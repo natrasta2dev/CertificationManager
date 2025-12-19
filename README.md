@@ -12,7 +12,6 @@
 - [Architecture](#-architecture)
 - [Installation](#-installation)
 - [Utilisation](#-utilisation)
-- [Roadmap](#-roadmap)
 - [Contribution](#-contribution)
 - [Sécurité](#-sécurité)
 - [License](#-license)
@@ -130,33 +129,6 @@ certmanager verify --certificate cert.pem
 # Voir les détails d'un certificat
 certmanager info --certificate cert.pem
 ```
-
-## 🗺️ Roadmap
-
-Voir [ROADMAP.md](ROADMAP.md) pour la roadmap détaillée.
-
-### Vue d'ensemble
-
-1. **Phase 1 - MVP (Semaines 1-4)** ✅ **TERMINÉ**
-   - ✅ Infrastructure de base
-   - ✅ Génération de certificats
-   - ✅ Stockage local sécurisé
-   - ✅ CLI fonctionnelle
-
-2. **Phase 2 - Gestion (Semaines 5-8)** ⏳ **À VENIR**
-   - Cycle de vie des certificats
-   - Alertes et notifications
-   - Import/Export
-
-3. **Phase 3 - Interface (Semaines 9-12)** 🟡 **EN COURS (70%)**
-   - ✅ API REST (FastAPI)
-   - ✅ Interface web moderne
-   - ⏳ Authentification
-
-4. **Phase 4 - Avancé (Semaines 13+)** ⏳ **À VENIR**
-   - Fonctionnalités avancées
-   - Intégrations
-   - Optimisations
 
 ## 🤝 Contribution
 

@@ -16,35 +16,6 @@
 - [Sécurité](#-sécurité)
 - [License](#-license)
 
-## ✨ Fonctionnalités
-
-### Phase 1 - Core (MVP) ✅ **TERMINÉ**
-- ✅ Génération de certificats auto-signés
-- ✅ Génération de Certificate Signing Requests (CSR)
-- ✅ Stockage sécurisé des certificats et clés privées
-- ✅ Validation de certificats (expiration, chaîne de confiance)
-- ✅ Support des formats PEM, DER
-- ✅ Interface en ligne de commande (CLI)
-
-### Phase 2 - Gestion avancée ⏳ **À VENIR**
-- ⏳ Gestion du cycle de vie des certificats
-- ⏳ Alertes d'expiration
-- ⏳ Renouvellement automatique
-- ⏳ Import/Export de certificats
-- ⏳ Gestion des autorités de certification (CA)
-
-### Phase 3 - Interface et intégration 🟡 **EN COURS**
-- ✅ Interface web (dashboard moderne et épuré)
-- ✅ API REST (FastAPI)
-- ✅ Intégration Let's Encrypt (ACME via certbot)
-- ⏳ Support multi-utilisateurs avec authentification
-
-### Phase 4 - Fonctionnalités avancées
-- 🚀 Support de certificats wildcard
-- 🚀 Gestion de certificats client (mutual TLS)
-- 🚀 Audit et journalisation
-- 🚀 Chiffrement des clés privées avec mots de passe
-- 🚀 Support HSM (Hardware Security Module)
 
 ## 🏗️ Architecture
 

@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CertificationManager - Gestionnaire de Certificats</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-certificate"></i>
+                    <h1>CertificationManager</h1>
+                </div>
+                <nav class="nav">
+                    <button class="nav-btn active" data-tab="certificates">
+                        <i class="fas fa-list"></i> Certificats
+                    </button>
+                    <button class="nav-btn" data-tab="generate">
+                        <i class="fas fa-plus-circle"></i> Générer
+                    </button>
+                    <button class="nav-btn" data-tab="csr">
+                        <i class="fas fa-file-alt"></i> CSR
+                    </button>
+                    <button class="nav-btn" data-tab="alerts">
+                        <i class="fas fa-bell"></i> Alertes
+                        <span id="alerts-badge" class="badge" style="display: none;">0</span>
+                    </button>
+                    <button class="nav-btn" data-tab="import-export">
+                        <i class="fas fa-exchange-alt"></i> Import/Export
+                    </button>
+                    <button class="nav-btn" data-tab="ca">
+                        <i class="fas fa-shield-alt"></i> CA
+                    </button>
+                    <button class="nav-btn" data-tab="letsencrypt">
+                        <i class="fas fa-lock"></i> Let's Encrypt
+                    </button>
+                    <button class="nav-btn" data-tab="client">
+                        <i class="fas fa-user-shield"></i> Certificats Client
+                    </button>
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Certificates Tab -->
+            <section id="certificates-tab" class="tab-content active">
+                <div class="section-header">
+                    <h2><i class="fas fa-certificate"></i> Mes Certificats</h2>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" id="select-all-btn" onclick="toggleSelectAll()" style="display: none;">
+                            <i class="fas fa-check-square"></i> Tout sélectionner
+                        </button>
+                        <button class="btn btn-primary" onclick="refreshCertificates()">
+                            <i class="fas fa-sync-alt"></i> Actualiser
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Barre d'actions en masse -->
+                <div id="bulk-actions-bar" class="bulk-actions-bar" style="display: none;">
+                    <div class="bulk-actions-info">
+                        <i class="fas fa-check-circle"></i>
+                        <span id="bulk-selection-count">0</span> certificat(s) sélectionné(s)
+                    </div>
+                    <div class="bulk-actions-buttons">
+                        <button class="btn btn-sm btn-primary" onclick="bulkRenew()" title="Renouveler les certificats sélectionnés">
+                            <i class="fas fa-sync-alt"></i> Renouveler
+                        </button>
+                        <button class="btn btn-sm btn-secondary" onclick="bulkExport()" title="Exporter les certificats sélectionnés">
+                            <i class="fas fa-download"></i> Exporter
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="bulkDelete()" title="Supprimer les certificats sélectionnés">
+                            <i class="fas fa-trash"></i> Supprimer
+                        </button>
+                        <button class="btn btn-sm btn-icon" onclick="clearSelection()" title="Désélectionner tout">
+                            <i class="fas fa-times"></i> Annuler
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Filtres avancés -->
+                <div class="filters-section">
+                    <div class="filters-header" onclick="toggleFilters()">
+                        <i class="fas fa-filter"></i> Filtres avancés
+                        <i class="fas fa-chevron-down" id="filters-chevron"></i>
+                    </div>
+                    <div id="filters-content" class="filters-content" style="display: none;">
+                        <div class="filters-grid">
+                            <div class="form-group">
+                                <label for="filter-status">Statut</label>
+                                <select id="filter-status" onchange="applyFilters()">
+                                    <option value="">Tous</option>
+                                    <option value="valid">Valides</option>
+                                    <option value="expiring">Expirent bientôt</option>
+                                    <option value="critical">Critiques</option>
+                                    <option value="expired">Expirés</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-key-type">Type de clé</label>
+                                <select id="filter-key-type" onchange="applyFilters()">
+                                    <option value="">Tous</option>
+                                    <option value="RSA">RSA</option>
+                                    <option value="ECDSA">ECDSA</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-expiry-days">Expire dans (jours)</label>
+                                <select id="filter-expiry-days" onchange="applyFilters()">
+                                    <option value="">Tous</option>
+                                    <option value="7">7 jours ou moins</option>
+                                    <option value="30">30 jours ou moins</option>
+                                    <option value="60">60 jours ou moins</option>
+                                    <option value="90">90 jours ou moins</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-organization">Organisation</label>
+                                <input type="text" id="filter-organization" placeholder="Filtrer par organisation..." oninput="applyFilters()">
+                            </div>
+                        </div>
+                        <div class="filters-actions">
+                            <button class="btn btn-sm btn-secondary" onclick="clearFilters()">
+                                <i class="fas fa-times"></i> Réinitialiser
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dashboard avec graphiques -->
+                <div id="dashboard-section" class="dashboard-section" style="display: none;">
+                    <div class="dashboard-grid">
+                        <!-- Statistiques rapides -->
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: var(--primary-color);">
+                                <i class="fas fa-certificate"></i>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-total">0</div>
+                                <div class="stat-label">Total Certificats</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: #10b981;">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-valid">0</div>
+                                <div class="stat-label">Valides</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: #f59e0b;">
+                                <i class="fas fa-exclamation-triangle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-expiring">0</div>
+                                <div class="stat-label">Expirent bientôt</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon" style="background: #ef4444;">
+                                <i class="fas fa-times-circle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <div class="stat-value" id="stat-expired">0</div>
+                                <div class="stat-label">Expirés</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Graphiques -->
+                    <div class="charts-grid">
+                        <div class="chart-card">
+                            <h3><i class="fas fa-chart-pie"></i> Répartition par statut</h3>
+                            <canvas id="status-chart"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h3><i class="fas fa-chart-line"></i> Timeline des expirations</h3>
+                            <canvas id="timeline-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="search-bar">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="search-input" placeholder="Rechercher un certificat...">
+                </div>
+
+                <div id="certificates-list" class="certificates-grid">
+                    <!-- Les certificats seront chargés ici -->
+                </div>
+
+                <div id="loading" class="loading">
+                    <i class="fas fa-spinner fa-spin"></i> Chargement...
+                </div>
+            </section>
+
+            <!-- Generate Tab -->
+            <section id="generate-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-plus-circle"></i> Générer un Certificat</h2>
+                </div>
+                
+                <form id="generate-form" class="form">
+                    <div class="form-group">
+                        <label for="common-name">Nom Commun (CN) *</label>
+                        <input type="text" id="common-name" name="common_name" required 
+                               placeholder="example.com ou *.example.com">
+                        <small>Support des wildcards : *.example.com pour tous les sous-domaines</small>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="validity-days">Validité (jours)</label>
+                            <input type="number" id="validity-days" name="validity_days" 
+                                   value="365" min="1" max="3650">
+                        </div>
+                        <div class="form-group">
+                            <label for="key-type">Type de clé</label>
+                            <select id="key-type" name="key_type">
+                                <option value="RSA">RSA</option>
+                                <option value="ECDSA">ECDSA</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="key-size">Taille de clé (bits)</label>
+                            <select id="key-size" name="key_size">
+                                <option value="2048">2048</option>
+                                <option value="3072">3072</option>
+                                <option value="4096">4096</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="country">Pays</label>
+                            <input type="text" id="country" name="country" 
+                                   placeholder="FR" maxlength="2">
+                        </div>
+                        <div class="form-group">
+                            <label for="state">État/Province</label>
+                            <input type="text" id="state" name="state" 
+                                   placeholder="Ile-de-France">
+                        </div>
+                        <div class="form-group">
+                            <label for="locality">Ville</label>
+                            <input type="text" id="locality" name="locality" 
+                                   placeholder="Paris">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="organization">Organisation</label>
+                            <input type="text" id="organization" name="organization" 
+                                   placeholder="Mon Entreprise">
+                        </div>
+                        <div class="form-group">
+                            <label for="organizational-unit">Unité Organisationnelle</label>
+                            <input type="text" id="organizational-unit" 
+                                   name="organizational_unit" placeholder="IT">
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Email</label>
+                            <input type="email" id="email" name="email" 
+                                   placeholder="admin@example.com">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="san-dns">Subject Alternative Names (DNS)</label>
+                        <input type="text" id="san-dns" name="san_dns" 
+                               placeholder="www.example.com, api.example.com, *.example.com (séparés par des virgules)">
+                        <small>Plusieurs noms séparés par des virgules. Support des wildcards : *.example.com</small>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-certificate"></i> Générer le Certificat
+                        </button>
+                        <button type="reset" class="btn btn-secondary">
+                            <i class="fas fa-redo"></i> Réinitialiser
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Alerts Tab -->
+            <section id="alerts-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-bell"></i> Alertes</h2>
+                    <button class="btn btn-primary" onclick="refreshAlerts()">
+                        <i class="fas fa-sync-alt"></i> Actualiser
+                    </button>
+                </div>
+
+                <div id="alerts-stats" class="stats-grid">
+                    <!-- Statistiques chargées dynamiquement -->
+                </div>
+
+                <div id="alerts-list" class="alerts-container">
+                    <!-- Alertes chargées dynamiquement -->
+                </div>
+
+                <div id="alerts-loading" class="loading">
+                    <i class="fas fa-spinner fa-spin"></i> Chargement...
+                </div>
+            </section>
+
+            <!-- CSR Tab -->
+            <section id="csr-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-file-alt"></i> Générer une CSR</h2>
+                </div>
+                
+                <form id="csr-form" class="form">
+                    <div class="form-group">
+                        <label for="csr-common-name">Nom Commun (CN) *</label>
+                        <input type="text" id="csr-common-name" name="common_name" required 
+                               placeholder="example.com">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="csr-key-type">Type de clé</label>
+                            <select id="csr-key-type" name="key_type">
+                                <option value="RSA">RSA</option>
+                                <option value="ECDSA">ECDSA</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="csr-key-size">Taille de clé (bits)</label>
+                            <select id="csr-key-size" name="key_size">
+                                <option value="2048">2048</option>
+                                <option value="3072">3072</option>
+                                <option value="4096">4096</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="csr-country">Pays</label>
+                            <input type="text" id="csr-country" name="country" 
+                                   placeholder="FR" maxlength="2">
+                        </div>
+                        <div class="form-group">
+                            <label for="csr-state">État/Province</label>
+                            <input type="text" id="csr-state" name="state">
+                        </div>
+                        <div class="form-group">
+                            <label for="csr-locality">Ville</label>
+                            <input type="text" id="csr-locality" name="locality">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="csr-organization">Organisation</label>
+                            <input type="text" id="csr-organization" name="organization">
+                        </div>
+                        <div class="form-group">
+                            <label for="csr-organizational-unit">Unité Organisationnelle</label>
+                            <input type="text" id="csr-organizational-unit" 
+                                   name="organizational_unit">
+                        </div>
+                        <div class="form-group">
+                            <label for="csr-email">Email</label>
+                            <input type="email" id="csr-email" name="email">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="csr-san-dns">Subject Alternative Names (DNS)</label>
+                        <input type="text" id="csr-san-dns" name="san_dns" 
+                               placeholder="www.example.com, api.example.com">
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-file-alt"></i> Générer la CSR
+                        </button>
+                        <button type="reset" class="btn btn-secondary">
+                            <i class="fas fa-redo"></i> Réinitialiser
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Import/Export Tab -->
+            <section id="import-export-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-exchange-alt"></i> Import / Export</h2>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                    <!-- Import Section -->
+                    <div class="card">
+                        <h3><i class="fas fa-download"></i> Importer un certificat</h3>
+                        <form id="import-form" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label for="import-format">Format</label>
+                                <select id="import-format" name="format" required>
+                                    <option value="pem">PEM</option>
+                                    <option value="der">DER</option>
+                                    <option value="p12">PKCS#12 (.p12/.pfx)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="import-cert-file">Fichier certificat *</label>
+                                <input type="file" id="import-cert-file" name="cert_file" required accept=".pem,.der,.p12,.pfx,.crt,.cer">
+                            </div>
+
+                            <div class="form-group" id="import-key-group" style="display: none;">
+                                <label for="import-key-file">Fichier clé privée (optionnel)</label>
+                                <input type="file" id="import-key-file" name="key_file" accept=".key,.pem">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="import-password">Mot de passe (optionnel)</label>
+                                <input type="password" id="import-password" name="password" placeholder="Pour PKCS#12 ou clé chiffrée">
+                            </div>
+
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="import-validate" name="validate" checked>
+                                    Valider le certificat après import
+                                </label>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-upload"></i> Importer
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Export Section -->
+                    <div class="card">
+                        <h3><i class="fas fa-upload"></i> Exporter un certificat</h3>
+                        <form id="export-form">
+                            <div class="form-group">
+                                <label for="export-cert-id">Certificat</label>
+                                <select id="export-cert-id" name="cert_id" required>
+                                    <option value="">Sélectionner un certificat...</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="export-format">Format</label>
+                                <select id="export-format" name="format" required>
+                                    <option value="pem">PEM</option>
+                                    <option value="der">DER</option>
+                                    <option value="p12">PKCS#12 (.p12)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="export-include-key" name="include_key">
+                                    Inclure la clé privée
+                                </label>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="export-password">Mot de passe (optionnel)</label>
+                                <input type="password" id="export-password" name="password" placeholder="Pour protéger la clé privée">
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-download"></i> Exporter
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </section>
+
+            <!-- CA Tab -->
+            <section id="ca-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-shield-alt"></i> Autorités de Certification</h2>
+                    <button class="btn btn-primary" onclick="refreshCA()">
+                        <i class="fas fa-sync-alt"></i> Actualiser
+                    </button>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                    <!-- Import CA Section -->
+                    <div class="card">
+                        <h3><i class="fas fa-download"></i> Importer une CA</h3>
+                        <form id="ca-import-form" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label for="ca-import-file">Fichier certificat CA *</label>
+                                <input type="file" id="ca-import-file" name="ca_file" required accept=".pem,.der,.crt,.cer">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="ca-import-name">Nom personnalisé (optionnel)</label>
+                                <input type="text" id="ca-import-name" name="name" placeholder="Ex: Let's Encrypt Root CA">
+                            </div>
+
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="ca-import-root" name="is_root" checked>
+                                    CA racine
+                                </label>
+                            </div>
+
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="ca-import-trust" name="is_trusted" checked>
+                                    CA de confiance
+                                </label>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-upload"></i> Importer
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- CA List Section -->
+                    <div class="card">
+                        <h3><i class="fas fa-list"></i> CA stockées</h3>
+                        <div id="ca-list" class="certificates-grid">
+                            <!-- Les CA seront chargées ici -->
+                        </div>
+                        <div id="ca-loading" class="loading" style="display: none;">
+                            <i class="fas fa-spinner fa-spin"></i> Chargement...
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Client Certificates Tab -->
+            <section id="client-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-user-shield"></i> Certificats Client (Mutual TLS)</h2>
+                </div>
+
+                <div class="card">
+                    <h3><i class="fas fa-plus-circle"></i> Générer un Certificat Client</h3>
+                    <form id="client-generate-form" class="form">
+                        <div class="form-group">
+                            <label for="client-common-name">Nom Commun (CN) *</label>
+                            <input type="text" id="client-common-name" name="common_name" required 
+                                   placeholder="client.example.com">
+                            <small>Identifiant unique du client</small>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="client-validity-days">Validité (jours)</label>
+                                <input type="number" id="client-validity-days" name="validity_days" 
+                                       value="365" min="1" max="3650">
+                            </div>
+                            <div class="form-group">
+                                <label for="client-key-type">Type de clé</label>
+                                <select id="client-key-type" name="key_type">
+                                    <option value="RSA">RSA</option>
+                                    <option value="ECDSA">ECDSA</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="client-key-size">Taille de clé (bits)</label>
+                                <select id="client-key-size" name="key_size">
+                                    <option value="2048">2048</option>
+                                    <option value="3072">3072</option>
+                                    <option value="4096">4096</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="client-country">Pays</label>
+                                <input type="text" id="client-country" name="country" 
+                                       placeholder="FR" maxlength="2">
+                            </div>
+                            <div class="form-group">
+                                <label for="client-state">État/Province</label>
+                                <input type="text" id="client-state" name="state" 
+                                       placeholder="Ile-de-France">
+                            </div>
+                            <div class="form-group">
+                                <label for="client-locality">Ville</label>
+                                <input type="text" id="client-locality" name="locality" 
+                                       placeholder="Paris">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="client-organization">Organisation</label>
+                                <input type="text" id="client-organization" name="organization" 
+                                       placeholder="Mon Entreprise">
+                            </div>
+                            <div class="form-group">
+                                <label for="client-organizational-unit">Unité Organisationnelle</label>
+                                <input type="text" id="client-organizational-unit" 
+                                       name="organizational_unit" placeholder="IT">
+                            </div>
+                            <div class="form-group">
+                                <label for="client-email">Email</label>
+                                <input type="email" id="client-email" name="email" 
+                                       placeholder="client@example.com">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="client-use-ca" name="use_ca">
+                                Signer avec une CA (optionnel)
+                            </label>
+                            <small>Si coché, vous devrez fournir le certificat et la clé CA</small>
+                        </div>
+
+                        <div id="client-ca-section" style="display: none;">
+                            <div class="form-group">
+                                <label for="client-ca-cert">Certificat CA (PEM)</label>
+                                <input type="file" id="client-ca-cert" name="ca_cert" accept=".pem,.crt">
+                            </div>
+                            <div class="form-group">
+                                <label for="client-ca-key">Clé privée CA (PEM)</label>
+                                <input type="file" id="client-ca-key" name="ca_key" accept=".key,.pem">
+                            </div>
+                            <div class="form-group">
+                                <label for="client-ca-password">Mot de passe CA (optionnel)</label>
+                                <input type="password" id="client-ca-password" name="ca_password" 
+                                       placeholder="Si la clé CA est chiffrée">
+                            </div>
+                        </div>
+
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-user-shield"></i> Générer le Certificat Client
+                            </button>
+                            <button type="reset" class="btn btn-secondary">
+                                <i class="fas fa-redo"></i> Réinitialiser
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="section-header" style="margin-top: 2rem;">
+                    <h2><i class="fas fa-list"></i> Certificats Client Stockés</h2>
+                    <button class="btn btn-primary" onclick="refreshClientCertificates()">
+                        <i class="fas fa-sync-alt"></i> Actualiser
+                    </button>
+                </div>
+
+                <div id="client-list" class="certificates-grid">
+                    <!-- Les certificats client seront chargés ici -->
+                </div>
+
+                <div id="client-loading" class="loading" style="display: none;">
+                    <i class="fas fa-spinner fa-spin"></i> Chargement...
+                </div>
+            </section>
+
+            <!-- Let's Encrypt Tab -->
+            <section id="letsencrypt-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-lock"></i> Let's Encrypt</h2>
+                    <button class="btn btn-primary" onclick="refreshLetsEncrypt()">
+                        <i class="fas fa-sync-alt"></i> Actualiser
+                    </button>
+                </div>
+
+                <div id="letsencrypt-certbot-check" class="card" style="margin-bottom: 2rem; background: var(--warning-color); color: white; display: none;">
+                    <p><i class="fas fa-exclamation-triangle"></i> <strong>certbot n'est pas installé.</strong> Installez-le pour utiliser Let's Encrypt.</p>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                    <!-- Obtain Certificate Section -->
+                    <div class="card">
+                        <h3><i class="fas fa-plus-circle"></i> Obtenir un certificat</h3>
+                        <form id="letsencrypt-obtain-form">
+                            <div class="form-group">
+                                <label for="le-domains">Domaines * (séparés par des virgules)</label>
+                                <input type="text" id="le-domains" name="domains" required 
+                                       placeholder="example.com, www.example.com">
+                                <small>Entrez les domaines séparés par des virgules</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="le-email">Email (optionnel)</label>
+                                <input type="email" id="le-email" name="email" 
+                                       placeholder="admin@example.com">
+                                <small>Pour les notifications Let's Encrypt</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="le-staging" name="staging">
+                                    Mode staging (pour tests)
+                                </label>
+                                <small>Utilise l'environnement de test de Let's Encrypt</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="le-standalone" name="standalone" checked>
+                                    Mode standalone
+                                </label>
+                                <small>Nécessite que le port 80 soit libre</small>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="le-webroot">Webroot (optionnel)</label>
+                                <input type="text" id="le-webroot" name="webroot" 
+                                       placeholder="/var/www/html">
+                                <small>Chemin du webroot pour la validation HTTP-01</small>
+                            </div>
+
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="fas fa-download"></i> Obtenir le certificat
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Let's Encrypt Certificates List -->
+                    <div class="card">
+                        <h3><i class="fas fa-list"></i> Certificats Let's Encrypt</h3>
+                        <div id="letsencrypt-list" class="certificates-grid">
+                            <!-- Les certificats seront chargés ici -->
+                        </div>
+                        <div id="letsencrypt-loading" class="loading" style="display: none;">
+                            <i class="fas fa-spinner fa-spin"></i> Chargement...
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Modal for Certificate Details -->
+        <div id="cert-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="modal-title">Détails du Certificat</h3>
+                    <button class="modal-close" onclick="closeModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body" id="modal-body">
+                    <!-- Contenu chargé dynamiquement -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container"></div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
+

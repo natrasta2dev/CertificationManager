@@ -1,0 +1,2 @@
+"""Utilitaires pour CertificationManager."""
+

@@ -129,8 +129,6 @@ La sécurité est une priorité absolue. Veuillez consulter [SECURITY.md](SECURI
 - [Documentation complète](docs/README.md)
 - [Guide de développement](docs/DEVELOPMENT.md)
 - [Guide d'API](docs/API.md)
-- [Suggestions d'améliorations](IMPROVEMENTS.md)
-- [Ce qui reste à faire](TODO.md)
 
 ## 🧪 Tests
 

@@ -11,6 +11,7 @@ from ..config import get_settings
 from ..core.users import UserManager
 from ..core.version import get_version
 from .middleware import CsrfMiddleware, RateLimitMiddleware
+from .idempotency import IdempotencyMiddleware
 from .routers import (
     alerts,
     app_config,
@@ -18,6 +19,7 @@ from .routers import (
     auth,
     automation,
     backup,
+    bulk,
     ca,
     certificates,
     client_certificates,
@@ -27,7 +29,27 @@ from .routers import (
     metrics,
     pages,
     statistics,
+    ws,
 )
+
+API_ROUTERS = [
+    (auth.router, "auth"),
+    (audit.router, "audit"),
+    (statistics.router, "statistics"),
+    (alerts.router, "alerts"),
+    (certificates.router, "certificates"),
+    (csr.router, "csr"),
+    (ca.router, "ca"),
+    (letsencrypt.router, "letsencrypt"),
+    (client_certificates.router, "client-certificates"),
+    (backup.router, "backup"),
+    (automation.router, "automation"),
+    (compliance.router, "compliance"),
+    (app_config.router, "config"),
+    (metrics.router, "metrics"),
+    (bulk.router, "bulk"),
+    (ws.router, "realtime"),
+]
 
 
 @asynccontextmanager
@@ -68,6 +90,7 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
+    app.add_middleware(IdempotencyMiddleware)
     app.add_middleware(
         RateLimitMiddleware,
         requests_per_minute=settings.rate_limit_per_minute,
@@ -79,19 +102,8 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     app.include_router(pages.router)
-    app.include_router(auth.router, prefix="/api", tags=["auth"])
-    app.include_router(audit.router, prefix="/api", tags=["audit"])
-    app.include_router(statistics.router, prefix="/api", tags=["statistics"])
-    app.include_router(alerts.router, prefix="/api", tags=["alerts"])
-    app.include_router(certificates.router, prefix="/api", tags=["certificates"])
-    app.include_router(csr.router, prefix="/api", tags=["csr"])
-    app.include_router(ca.router, prefix="/api", tags=["ca"])
-    app.include_router(letsencrypt.router, prefix="/api", tags=["letsencrypt"])
-    app.include_router(client_certificates.router, prefix="/api", tags=["client-certificates"])
-    app.include_router(backup.router, prefix="/api", tags=["backup"])
-    app.include_router(automation.router, prefix="/api", tags=["automation"])
-    app.include_router(compliance.router, prefix="/api", tags=["compliance"])
-    app.include_router(app_config.router, prefix="/api", tags=["config"])
-    app.include_router(metrics.router, prefix="/api", tags=["metrics"])
+    for router, tag in API_ROUTERS:
+        app.include_router(router, prefix="/api", tags=[tag])
+        app.include_router(router, prefix="/api/v1", tags=[f"v1-{tag}"])
 
     return app

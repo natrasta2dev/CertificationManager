@@ -34,6 +34,7 @@ from ..core.app_config import (
 )
 from ..core.alerts import AlertLevel
 from ..core.version import get_version
+from .output import OUTPUT_FORMATS, alerts_table, certificates_table, emit_data
 from .web_command import web
 
 
@@ -132,6 +133,11 @@ def generate(
     output: Optional[str],
 ):
     """Génère un certificat auto-signé."""
+    click.echo(
+        "⚠️  Sécurité : conservez la clé privée en lieu sûr. "
+        "Activez CERTMANAGER_ENCRYPT_KEYS pour chiffrer le stockage.",
+        err=True,
+    )
     try:
         cert_manager = CertificateManager()
         
@@ -334,14 +340,14 @@ def csr_delete(id: str):
         sys.exit(1)
 
 
-@cli.command()
+@cli.command("list")
 @click.option(
-    "--format",
-    type=click.Choice(["table", "json"], case_sensitive=False),
+    "--format", "output_format",
+    type=click.Choice(OUTPUT_FORMATS, case_sensitive=False),
     default="table",
-    help="Format de sortie"
+    help="Format de sortie",
 )
-def list(format: str):
+def list_cmd(output_format: str):
     """Liste tous les certificats stockés."""
     try:
         storage = SecureStorage()
@@ -351,25 +357,12 @@ def list(format: str):
             click.echo("Aucun certificat trouvé.")
             return
 
-        if format == "json":
-            import json
-            click.echo(json.dumps(certificates, indent=2))
-        else:
-            click.echo(f"\n{'ID':<36} {'CN':<30} {'Expire le':<12} {'Statut':<10}")
-            click.echo("-" * 90)
-            for cert in certificates:
-                cert_id = cert.get("id", "N/A")[:36]
-                cn = cert.get("common_name", "N/A")[:30]
-                expires = cert.get("not_valid_after", "N/A")
-                if isinstance(expires, str) and "T" in expires:
-                    expires = expires.split("T")[0]
-                
-                status = "✅ Valide" if not cert.get("is_expired", False) else "❌ Expiré"
-                days = cert.get("days_until_expiry", 0)
-                if days > 0 and days <= 30:
-                    status = f"⚠️  {days}j"
-                
-                click.echo(f"{cert_id:<36} {cn:<30} {expires:<12} {status:<10}")
+        emit_data(
+            certificates,
+            output_format,
+            table_renderer=lambda: certificates_table(certificates),
+            csv_rows=certificates,
+        )
 
     except Exception as e:
         click.echo(f"❌ Erreur: {e}", err=True)
@@ -507,12 +500,12 @@ def delete(id: str):
     help="Inclure les certificats déjà expirés"
 )
 @click.option(
-    "--format",
-    type=click.Choice(["table", "json"], case_sensitive=False),
+    "--format", "output_format",
+    type=click.Choice(OUTPUT_FORMATS, case_sensitive=False),
     default="table",
-    help="Format de sortie"
+    help="Format de sortie",
 )
-def expiring(days: int, include_expired: bool, format: str):
+def expiring(days: int, include_expired: bool, output_format: str):
     """Liste les certificats expirant bientôt."""
     try:
         lifecycle = CertificateLifecycle()
@@ -521,36 +514,16 @@ def expiring(days: int, include_expired: bool, format: str):
             include_expired=include_expired
         )
 
-        if format == "json":
-            import json
-            click.echo(json.dumps(expiring_certs, indent=2))
-        else:
-            if not expiring_certs:
-                click.echo(f"✅ Aucun certificat n'expire dans les {days} prochains jours.")
-                return
+        if not expiring_certs and output_format == "table":
+            click.echo(f"✅ Aucun certificat n'expire dans les {days} prochains jours.")
+            return
 
-            click.echo(f"\n⚠️  Certificats expirant dans les {days} jours:")
-            click.echo(f"{'ID':<36} {'CN':<30} {'Expire le':<12} {'Jours':<8} {'Statut':<10}")
-            click.echo("-" * 100)
-            
-            for cert in expiring_certs:
-                cert_id = cert.get("id", "N/A")[:36]
-                cn = cert.get("common_name", "N/A")[:30]
-                expires = cert.get("not_valid_after", "N/A")
-                if isinstance(expires, str) and "T" in expires:
-                    expires = expires.split("T")[0]
-                
-                days_left = cert.get("days_until_expiry", 0)
-                is_expired = cert.get("is_expired", False)
-                
-                if is_expired:
-                    status = "❌ Expiré"
-                elif days_left <= 7:
-                    status = f"🔴 {days_left}j"
-                else:
-                    status = f"⚠️  {days_left}j"
-                
-                click.echo(f"{cert_id:<36} {cn:<30} {expires:<12} {days_left:<8} {status:<10}")
+        emit_data(
+            expiring_certs,
+            output_format,
+            csv_rows=expiring_certs,
+            table_renderer=lambda: certificates_table(expiring_certs),
+        )
 
     except Exception as e:
         click.echo(f"❌ Erreur: {e}", err=True)
@@ -563,50 +536,28 @@ def expiring(days: int, include_expired: bool, format: str):
     help="ID du certificat (optionnel, sinon affiche les stats globales)"
 )
 @click.option(
-    "--format",
-    type=click.Choice(["table", "json"], case_sensitive=False),
+    "--format", "output_format",
+    type=click.Choice(OUTPUT_FORMATS, case_sensitive=False),
     default="table",
-    help="Format de sortie"
+    help="Format de sortie",
 )
-def status(id: Optional[str], format: str):
+def status(id: Optional[str], output_format: str):
     """Affiche le statut d'un certificat ou les statistiques globales."""
     try:
         lifecycle = CertificateLifecycle()
 
         if id:
-            # Statut d'un certificat spécifique
             status_data = lifecycle.get_certificate_status(id)
-            
-            if format == "json":
-                import json
-                click.echo(json.dumps(status_data, indent=2))
-            else:
-                click.echo(f"\n📊 Statut du certificat: {id}")
-                click.echo("=" * 60)
-                click.echo(f"Nom commun: {status_data.get('common_name', 'N/A')}")
-                click.echo(f"Statut: {status_data.get('status_label', 'N/A')}")
-                click.echo(f"Jours restants: {status_data.get('days_until_expiry', 'N/A')}")
-                click.echo(f"Expire le: {status_data.get('expires_at', 'N/A')}")
-                click.echo(f"Valide: {'✅ Oui' if status_data.get('is_valid') else '❌ Non'}")
-                if status_data.get('validation_errors'):
-                    click.echo("Erreurs de validation:")
-                    for error in status_data['validation_errors']:
-                        click.echo(f"  - {error}")
+            emit_data(status_data, output_format)
         else:
-            # Statistiques globales
             stats = lifecycle.get_statistics()
-            
-            if format == "json":
-                import json
-                click.echo(json.dumps(stats, indent=2))
+            if output_format == "table":
+                click.echo("\n📊 Statistiques globales")
+                click.echo("=" * 40)
+                for k, v in stats.items():
+                    click.echo(f"  {k}: {v}")
             else:
-                click.echo("\n📊 Statistiques des certificats:")
-                click.echo("=" * 60)
-                click.echo(f"Total: {stats['total']}")
-                click.echo(f"✅ Valides: {stats['valid']}")
-                click.echo(f"⚠️  Expirant bientôt (≤30j): {stats['expiring_soon']}")
-                click.echo(f"🔴 Critique (≤7j): {stats['critical']}")
-                click.echo(f"❌ Expirés: {stats['expired']}")
+                emit_data(stats, output_format)
 
     except Exception as e:
         click.echo(f"❌ Erreur: {e}", err=True)
@@ -626,17 +577,16 @@ def status(id: Optional[str], format: str):
     help="Inclure les certificats expirés"
 )
 @click.option(
-    "--format",
-    type=click.Choice(["table", "json"], case_sensitive=False),
+    "--format", "output_format",
+    type=click.Choice(OUTPUT_FORMATS, case_sensitive=False),
     default="table",
-    help="Format de sortie"
+    help="Format de sortie",
 )
-def alerts(threshold: tuple, include_expired: bool, format: str):
+def alerts(threshold: tuple, include_expired: bool, output_format: str):
     """Vérifie et affiche les alertes pour les certificats."""
     try:
         from ..core.alerts import AlertLevel
         
-        # Configurer les seuils
         thresholds = {}
         if threshold:
             for days, level_str in threshold:
@@ -644,9 +594,8 @@ def alerts(threshold: tuple, include_expired: bool, format: str):
                     level = AlertLevel[level_str.upper()]
                     thresholds[days] = level
                 except KeyError:
-                    click.echo(f"⚠️  Niveau d'alerte invalide: {level_str}. Utilisez: info, warning, critical, error", err=True)
+                    click.echo(f"⚠️  Niveau invalide: {level_str}", err=True)
         else:
-            # Seuils par défaut
             thresholds = {
                 7: AlertLevel.CRITICAL,
                 30: AlertLevel.WARNING,
@@ -655,31 +604,18 @@ def alerts(threshold: tuple, include_expired: bool, format: str):
 
         alert_manager = AlertManager(thresholds=thresholds)
         alerts_list = alert_manager.check_certificates(include_expired=include_expired)
+        alert_dicts = [a.to_dict() for a in alerts_list]
 
-        if format == "json":
-            import json
-            click.echo(json.dumps([alert.to_dict() for alert in alerts_list], indent=2))
-        else:
-            if not alerts_list:
-                click.echo("✅ Aucune alerte.")
-                return
+        if not alert_dicts and output_format == "table":
+            click.echo("✅ Aucune alerte.")
+            return
 
-            click.echo(f"\n🔔 Alertes ({len(alerts_list)}):")
-            click.echo("=" * 80)
-            
-            for alert in alerts_list:
-                level_icon = {
-                    "info": "ℹ️",
-                    "warning": "⚠️",
-                    "critical": "🔴",
-                    "error": "❌",
-                }.get(alert.level.value, "•")
-                
-                click.echo(f"{level_icon} [{alert.level.value.upper()}] {alert.message}")
-                click.echo(f"   Certificat: {alert.common_name} (ID: {alert.cert_id[:8]}...)")
-                if alert.days_until_expiry > 0:
-                    click.echo(f"   Jours restants: {alert.days_until_expiry}")
-                click.echo()
+        emit_data(
+            alert_dicts,
+            output_format,
+            csv_rows=alert_dicts,
+            table_renderer=lambda: alerts_table(alert_dicts),
+        )
 
     except Exception as e:
         click.echo(f"❌ Erreur: {e}", err=True)
@@ -1749,7 +1685,10 @@ def scheduler():
 
 
 @scheduler.command("run")
-@click.argument("job", type=click.Choice(["check-alerts", "auto-renew", "compliance-scan", "weekly-report", "all"]))
+@click.argument("job", type=click.Choice([
+    "check-alerts", "auto-renew", "compliance-scan",
+    "weekly-report", "monthly-report", "all",
+]))
 @click.option("--days", type=int, help="Seuil jours pour auto-renew")
 def scheduler_run(job: str, days: Optional[int]):
     """Exécute une tâche une fois (compatible cron)."""
@@ -1828,6 +1767,15 @@ def scheduler_config(
     else:
         cfg = service.get_config()
     click.echo(json.dumps(cfg, indent=2, ensure_ascii=False))
+
+
+@cli.command("completion")
+@click.option("--shell", type=click.Choice(["bash", "zsh", "fish"]), default="bash")
+def completion(shell: str):
+    """Affiche le script d'auto-complétion shell."""
+    click.echo(f"# Ajoutez à votre shell ({shell}) :")
+    click.echo(f'# eval "$(_CERTMANAGER_COMPLETE={shell}_source certmanager)"')
+    click.echo(f"_CERTMANAGER_COMPLETE={shell}_source certmanager")
 
 
 cli.add_command(user)

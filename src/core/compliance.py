@@ -94,6 +94,87 @@ class ComplianceScanner:
             "compliance_rate": round((compliant / total) * 100, 1) if total else 100.0,
         }
 
+    def guidelines_dashboard(self) -> Dict[str, Any]:
+        """Tableau de bord conformité Mozilla / NIST."""
+        scan = self.scan_all()
+        certs = self.storage.list_certificates()
+        stats = {
+            "sha256_signatures": 0,
+            "weak_signatures": 0,
+            "rsa_2048_plus": 0,
+            "rsa_weak": 0,
+            "ecdsa_keys": 0,
+            "expired": 0,
+            "expiring_30d": 0,
+            "valid_long_term": 0,
+        }
+        mozilla_checks = {
+            "signature_sha256": {"pass": 0, "fail": 0},
+            "rsa_key_2048": {"pass": 0, "fail": 0},
+            "not_expired": {"pass": 0, "fail": 0},
+            "validity_under_825_days": {"pass": 0, "fail": 0},
+        }
+
+        for meta in certs:
+            cert_id = meta.get("id")
+            if not cert_id:
+                continue
+            try:
+                cert, _ = self.storage.load_certificate(cert_id)
+                sig = cert.signature_algorithm_oid._name
+                if "sha256" in sig.lower() or "ecdsa" in sig.lower():
+                    stats["sha256_signatures"] += 1
+                    mozilla_checks["signature_sha256"]["pass"] += 1
+                else:
+                    stats["weak_signatures"] += 1
+                    mozilla_checks["signature_sha256"]["fail"] += 1
+
+                pk = cert.public_key()
+                if isinstance(pk, rsa.RSAPublicKey):
+                    if pk.key_size >= 2048:
+                        stats["rsa_2048_plus"] += 1
+                        mozilla_checks["rsa_key_2048"]["pass"] += 1
+                    else:
+                        stats["rsa_weak"] += 1
+                        mozilla_checks["rsa_key_2048"]["fail"] += 1
+                else:
+                    stats["ecdsa_keys"] += 1
+                    mozilla_checks["rsa_key_2048"]["pass"] += 1
+
+                if meta.get("is_expired"):
+                    stats["expired"] += 1
+                    mozilla_checks["not_expired"]["fail"] += 1
+                else:
+                    mozilla_checks["not_expired"]["pass"] += 1
+                    days = meta.get("days_until_expiry") or 0
+                    if days <= 30:
+                        stats["expiring_30d"] += 1
+                    else:
+                        stats["valid_long_term"] += 1
+
+                lifetime = (cert.not_valid_after_utc - cert.not_valid_before_utc).days
+                if lifetime <= 825:
+                    mozilla_checks["validity_under_825_days"]["pass"] += 1
+                else:
+                    mozilla_checks["validity_under_825_days"]["fail"] += 1
+            except Exception:
+                continue
+
+        nist_score = 0
+        total_checks = len(mozilla_checks) * max(len(certs), 1)
+        passed = sum(c["pass"] for c in mozilla_checks.values())
+        if certs:
+            nist_score = round((passed / (len(mozilla_checks) * len(certs))) * 100, 1)
+
+        return {
+            **scan,
+            "guidelines": {
+                "mozilla": mozilla_checks,
+                "nist_alignment_score": nist_score,
+            },
+            "algorithm_stats": stats,
+        }
+
     def scan_one(self, cert_id: str) -> Tuple[bool, List[str]]:
         """Scanne un certificat par identifiant."""
         cert, meta = self.storage.load_certificate(cert_id)

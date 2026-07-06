@@ -4,71 +4,109 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CertificationManager - Gestionnaire de Certificats</title>
+    <link rel="icon" href="/favicon.ico" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-content">
-                <div class="logo">
-                    <i class="fas fa-certificate"></i>
+    <div class="app-shell">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar" aria-label="Navigation latérale">
+            <div class="sidebar-brand">
+                <i class="fas fa-shield-halved" aria-hidden="true"></i>
+                <div class="sidebar-brand-text">
                     <h1>CertificationManager</h1>
+                    <span>PKI · v0.2</span>
                 </div>
-                <button class="btn btn-icon theme-toggle" id="theme-toggle" title="Mode sombre" onclick="toggleTheme()">
-                    <i class="fas fa-moon"></i>
-                </button>
-                <nav class="nav">
-                    <button class="nav-btn active" data-tab="certificates">
-                        <i class="fas fa-list"></i> Certificats
-                    </button>
-                    <button class="nav-btn" data-tab="generate">
-                        <i class="fas fa-plus-circle"></i> Générer
-                    </button>
-                    <button class="nav-btn" data-tab="csr">
-                        <i class="fas fa-file-alt"></i> CSR
-                    </button>
-                    <button class="nav-btn" data-tab="alerts">
-                        <i class="fas fa-bell"></i> Alertes
-                        <span id="alerts-badge" class="badge" style="display: none;">0</span>
-                    </button>
-                    <button class="nav-btn" data-tab="import-export">
-                        <i class="fas fa-exchange-alt"></i> Import/Export
-                    </button>
-                    <button class="nav-btn" data-tab="ca">
-                        <i class="fas fa-shield-alt"></i> CA
-                    </button>
-                    <button class="nav-btn" data-tab="letsencrypt">
-                        <i class="fas fa-lock"></i> Let's Encrypt
-                    </button>
-                    <button class="nav-btn" data-tab="client">
-                        <i class="fas fa-user-shield"></i> Certificats Client
-                    </button>
-                    <button class="nav-btn" data-tab="archives">
-                        <i class="fas fa-archive"></i> Archives
-                    </button>
-                    <button class="nav-btn" data-tab="settings">
-                        <i class="fas fa-cog"></i> Paramètres
-                    </button>
-                    <button class="nav-btn" data-tab="audit" id="nav-audit" style="display:none;">
-                        <i class="fas fa-clipboard-list"></i> Audit
-                    </button>
-                    <button class="nav-btn" data-tab="admin" id="nav-admin" style="display:none;">
-                        <i class="fas fa-users-cog"></i> Admin
-                    </button>
-                </nav>
             </div>
-        </header>
+            <nav class="sidebar-nav" role="navigation" aria-label="Navigation principale">
+                <span class="sidebar-section-label">Inventaire</span>
+                <button class="nav-btn active" data-tab="certificates" aria-current="page">
+                    <i class="fas fa-layer-group" aria-hidden="true"></i>
+                    <span data-i18n="nav.certificates">Certificats</span>
+                </button>
+                <button class="nav-btn" data-tab="generate">
+                    <i class="fas fa-plus" aria-hidden="true"></i>
+                    <span data-i18n="nav.generate">Générer</span>
+                </button>
+                <button class="nav-btn" data-tab="csr">
+                    <i class="fas fa-file-signature" aria-hidden="true"></i>
+                    <span>CSR</span>
+                </button>
+                <button class="nav-btn" data-tab="alerts">
+                    <i class="fas fa-bell" aria-hidden="true"></i>
+                    <span data-i18n="nav.alerts">Alertes</span>
+                    <span id="alerts-badge" class="badge badge-nav" style="display: none;">0</span>
+                </button>
+                <span class="sidebar-section-label">Opérations</span>
+                <button class="nav-btn" data-tab="import-export">
+                    <i class="fas fa-arrow-right-arrow-left" aria-hidden="true"></i>
+                    <span>Import / Export</span>
+                </button>
+                <button class="nav-btn" data-tab="ca">
+                    <i class="fas fa-building-shield" aria-hidden="true"></i>
+                    <span>Autorité CA</span>
+                </button>
+                <button class="nav-btn" data-tab="letsencrypt">
+                    <i class="fas fa-lock" aria-hidden="true"></i>
+                    <span>Let's Encrypt</span>
+                </button>
+                <button class="nav-btn" data-tab="client">
+                    <i class="fas fa-user-lock" aria-hidden="true"></i>
+                    <span>Certs Client</span>
+                </button>
+                <button class="nav-btn" data-tab="archives">
+                    <i class="fas fa-box-archive" aria-hidden="true"></i>
+                    <span>Archives</span>
+                </button>
+                <span class="sidebar-section-label">Système</span>
+                <button class="nav-btn" data-tab="settings">
+                    <i class="fas fa-sliders" aria-hidden="true"></i>
+                    <span data-i18n="nav.settings">Paramètres</span>
+                </button>
+                <button class="nav-btn" data-tab="audit" id="nav-audit" style="display:none;">
+                    <i class="fas fa-clipboard-list" aria-hidden="true"></i>
+                    <span>Audit</span>
+                </button>
+                <button class="nav-btn" data-tab="admin" id="nav-admin" style="display:none;">
+                    <i class="fas fa-users-gear" aria-hidden="true"></i>
+                    <span>Administration</span>
+                </button>
+            </nav>
+            <div class="sidebar-footer">© CertificationManager</div>
+        </aside>
+        <div class="sidebar-overlay" id="sidebar-overlay" aria-hidden="true"></div>
 
-        <!-- Main Content -->
-        <main class="main-content">
+        <div class="app-main">
+            <header class="topbar">
+                <button class="btn btn-icon btn-secondary mobile-only" id="sidebar-toggle" aria-label="Ouvrir le menu">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="topbar-title">
+                    <h1 id="page-title">Certificats</h1>
+                    <p id="page-subtitle">Inventaire et cycle de vie PKI</p>
+                </div>
+                <div class="topbar-actions">
+                    <span class="topbar-hint" title="Raccourcis clavier"><kbd>/</kbd> recherche · <kbd>n</kbd> nouveau · <kbd>r</kbd> refresh</span>
+                    <button class="btn btn-icon btn-secondary" id="lang-toggle" title="FR / EN" onclick="toggleLang()" aria-label="Changer la langue">
+                        <i class="fas fa-language"></i>
+                    </button>
+                    <button class="btn btn-icon btn-secondary theme-toggle" id="theme-toggle" title="Mode sombre" onclick="toggleTheme()" aria-label="Basculer le thème">
+                        <i class="fas fa-moon"></i>
+                    </button>
+                </div>
+            </header>
+
+            <main class="main-content">
             <!-- Certificates Tab -->
             <section id="certificates-tab" class="tab-content active">
                 <div class="section-header">
                     <h2><i class="fas fa-certificate"></i> Mes Certificats</h2>
                     <div class="header-actions">
+                        <button class="btn btn-secondary" id="cert-view-toggle" onclick="toggleCertViewUI()" title="Vue grille / tableau" aria-label="Basculer vue grille ou tableau">
+                            <i class="fas fa-table"></i>
+                        </button>
                         <button class="btn btn-secondary" id="select-all-btn" onclick="toggleSelectAll()" style="display: none;">
                             <i class="fas fa-check-square"></i> Tout sélectionner
                         </button>
@@ -239,8 +277,15 @@
                 <div class="section-header">
                     <h2><i class="fas fa-plus-circle"></i> Générer un Certificat</h2>
                 </div>
+
+                <div class="wizard-stepper" id="generate-stepper" aria-label="Étapes du wizard">
+                    <div class="step active" data-step="0">1. Identité & clé</div>
+                    <div class="step" data-step="1">2. Organisation</div>
+                    <div class="step" data-step="2">3. SAN & validation</div>
+                </div>
                 
-                <form id="generate-form" class="form">
+                <form id="generate-form" class="form" aria-label="Formulaire de génération de certificat">
+                    <div class="wizard-step" data-step="0">
                     <div class="form-group">
                         <label for="common-name">Nom Commun (CN) *</label>
                         <input type="text" id="common-name" name="common_name" required 
@@ -270,7 +315,9 @@
                             </select>
                         </div>
                     </div>
+                    </div>
 
+                    <div class="wizard-step" data-step="1" style="display:none;">
                     <div class="form-row">
                         <div class="form-group">
                             <label for="country">Pays</label>
@@ -306,7 +353,9 @@
                                    placeholder="admin@example.com">
                         </div>
                     </div>
+                    </div>
 
+                    <div class="wizard-step" data-step="2" style="display:none;">
                     <div class="form-group">
                         <label for="san-dns">Subject Alternative Names (DNS)</label>
                         <input type="text" id="san-dns" name="san_dns" 
@@ -319,13 +368,22 @@
                                placeholder="192.168.1.1, 10.0.0.1">
                     </div>
 
+                    <div class="wizard-nav form-actions">
+                        <button type="button" class="btn btn-secondary" id="wizard-prev" style="display:none;">
+                            <i class="fas fa-arrow-left"></i> <span data-i18n="wizard.prev">Précédent</span>
+                        </button>
+                        <button type="button" class="btn btn-primary" id="wizard-next">
+                            <span data-i18n="wizard.next">Suivant</span> <i class="fas fa-arrow-right"></i>
+                        </button>
+                    </div>
                     <div class="form-actions">
-                        <button type="submit" class="btn btn-primary">
+                        <button type="submit" class="btn btn-primary" style="display:none;">
                             <i class="fas fa-certificate"></i> Générer le Certificat
                         </button>
                         <button type="reset" class="btn btn-secondary">
                             <i class="fas fa-redo"></i> Réinitialiser
                         </button>
+                    </div>
                     </div>
                 </form>
             </section>
@@ -333,7 +391,13 @@
             <!-- Alerts Tab -->
             <section id="alerts-tab" class="tab-content">
                 <div class="section-header">
-                    <h2><i class="fas fa-bell"></i> Alertes</h2>
+                    <div>
+                        <h2><i class="fas fa-bell"></i> Alertes</h2>
+                        <span class="live-indicator" id="alerts-live-indicator">
+                            <span class="live-dot"></span>
+                            <span class="live-label">Temps réel</span>
+                        </span>
+                    </div>
                     <button class="btn btn-primary" onclick="refreshAlerts()">
                         <i class="fas fa-sync-alt"></i> Actualiser
                     </button>
@@ -467,6 +531,10 @@
                                 </select>
                             </div>
 
+                            <div id="import-drop-zone" class="import-drop-zone" role="region" aria-label="Zone de dépôt pour import">
+                                <i class="fas fa-cloud-upload-alt" aria-hidden="true"></i>
+                                <p data-i18n="import.drop">Déposez vos fichiers ici</p>
+                            </div>
                             <div class="form-group">
                                 <label for="import-cert-file">Fichier certificat *</label>
                                 <input type="file" id="import-cert-file" name="cert_file" required accept=".pem,.der,.p12,.pfx,.crt,.cer">
@@ -921,6 +989,15 @@
                             <button type="button" class="btn btn-secondary btn-sm" onclick="runComplianceScan()">
                                 <i class="fas fa-search"></i> Scanner conformité
                             </button>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="loadComplianceDashboard()">
+                                <i class="fas fa-chart-bar"></i> Dashboard Mozilla/NIST
+                            </button>
+                            <a class="btn btn-secondary btn-sm" href="/api/reports/compliance.pdf" download>
+                                <i class="fas fa-file-pdf"></i> PDF conformité
+                            </a>
+                            <a class="btn btn-secondary btn-sm" href="/api/reports/expiration.pdf" download>
+                                <i class="fas fa-file-pdf"></i> PDF expiration
+                            </a>
                             <a class="btn btn-secondary btn-sm" href="/api/reports/certificates.csv" download>
                                 <i class="fas fa-file-csv"></i> Export CSV inventaire
                             </a>
@@ -929,6 +1006,7 @@
                             </a>
                         </div>
                         <div id="compliance-results" class="form-hint"></div>
+                        <div id="compliance-dashboard" class="compliance-dashboard" style="margin-top:1rem;"></div>
                     </div>
                 </div>
             </section>
@@ -975,16 +1053,23 @@
                 </div>
                 <div id="users-list-container"></div>
             </section>
-        </main>
+            </main>
+        </div>
 
         <!-- Modal for Certificate Details -->
-        <div id="cert-modal" class="modal">
+        <div id="cert-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
             <div class="modal-content">
                 <div class="modal-header">
                     <h3 id="modal-title">Détails du Certificat</h3>
-                    <button class="modal-close" onclick="closeModal()">
+                    <button class="modal-close" onclick="closeModal()" aria-label="Fermer">
                         <i class="fas fa-times"></i>
                     </button>
+                </div>
+                <div class="modal-tabs" id="modal-tabs" role="tablist">
+                    <button class="modal-tab active" data-modal-tab="general" role="tab">Général</button>
+                    <button class="modal-tab" data-modal-tab="san" role="tab">SAN</button>
+                    <button class="modal-tab" data-modal-tab="chain" role="tab">Chaîne</button>
+                    <button class="modal-tab" data-modal-tab="actions" role="tab">Actions</button>
                 </div>
                 <div class="modal-body" id="modal-body">
                     <!-- Contenu chargé dynamiquement -->
@@ -993,9 +1078,10 @@
         </div>
 
         <!-- Toast Notifications -->
-        <div id="toast-container"></div>
+        <div id="toast-container" aria-live="polite"></div>
     </div>
 
+    <script type="module" src="/static/js/main.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

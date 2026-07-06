@@ -170,3 +170,35 @@ class EmailNotifier:
         """
         subject = f"[CertManager] Rapport hebdomadaire — {stats.get('total', 0)} certificat(s)"
         self.send_email(subject, html, text_body=f"{len(alerts)} alerte(s) cette semaine")
+
+    def send_monthly_report(self, alerts: List[Alert], stats: Dict, compliance: Dict) -> None:
+        """Rapport mensuel avec conformité."""
+        html = f"""
+        <html><body style="font-family: sans-serif;">
+        <h2>Rapport mensuel CertificationManager</h2>
+        <p>Conformité: {compliance.get('compliance_rate', 0)}% —
+        score NIST/Mozilla: {compliance.get('guidelines', {}).get('nist_alignment_score', 0)}%</p>
+        <ul>
+          <li>Total certificats : {stats.get('total', 0)}</li>
+          <li>Alertes actives : {len(alerts)}</li>
+          <li>Problèmes conformité : {compliance.get('issues_count', 0)}</li>
+        </ul>
+        </body></html>
+        """
+        subject = f"[CertManager] Rapport mensuel — {stats.get('total', 0)} certificat(s)"
+        self.send_email(subject, html, text_body=f"Rapport mensuel — {len(alerts)} alerte(s)")
+
+    def send_compliance_report(self, compliance: Dict) -> None:
+        """Envoie un résumé de conformité par email."""
+        html = f"""
+        <html><body>
+        <h2>Rapport de conformité</h2>
+        <p>Taux: {compliance.get('compliance_rate')}% | Problèmes: {compliance.get('issues_count')}</p>
+        <p>Score NIST/Mozilla: {compliance.get('guidelines', {}).get('nist_alignment_score')}%</p>
+        </body></html>
+        """
+        self.send_email(
+            "[CertManager] Rapport de conformité",
+            html,
+            text_body=f"Conformité {compliance.get('compliance_rate')}%",
+        )

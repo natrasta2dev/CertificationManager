@@ -22,7 +22,10 @@ from .config_store import ConfigStore
 class SchedulerService:
     """Exécute les tâches planifiées (alertes, renouvellement, conformité)."""
 
-    AVAILABLE_JOBS = ("check-alerts", "auto-renew", "compliance-scan", "weekly-report", "all")
+    AVAILABLE_JOBS = (
+        "check-alerts", "auto-renew", "compliance-scan",
+        "weekly-report", "monthly-report", "all",
+    )
 
     def __init__(self, storage_path: Optional[str] = None):
         if storage_path is None:
@@ -84,6 +87,8 @@ class SchedulerService:
             return self._job_compliance_scan()
         if job_name == "weekly-report":
             return self._job_weekly_report()
+        if job_name == "monthly-report":
+            return self._job_monthly_report()
 
         return {}
 
@@ -162,6 +167,24 @@ class SchedulerService:
                 result["email_error"] = str(e)
 
         self._log(f"weekly-report: {len(alerts)} alerte(s)")
+        return result
+
+    def _job_monthly_report(self) -> Dict[str, Any]:
+        alerts = self.alert_manager.check_certificates(include_expired=True)
+        stats = self.lifecycle.get_statistics()
+        compliance = ComplianceScanner(self.storage).guidelines_dashboard()
+        result: Dict[str, Any] = {
+            "alerts_count": len(alerts),
+            "compliance_rate": compliance.get("compliance_rate"),
+            "email_sent": False,
+        }
+        if self.email_notifier.is_enabled():
+            try:
+                self.email_notifier.send_monthly_report(alerts, stats, compliance)
+                result["email_sent"] = True
+            except Exception as e:
+                result["email_error"] = str(e)
+        self._log(f"monthly-report: {len(alerts)} alerte(s)")
         return result
 
     def write_pid(self) -> None:

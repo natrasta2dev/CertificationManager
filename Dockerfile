@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY pyproject.toml setup.py README.md ./
+COPY pyproject.toml setup.py README.md generate_test_certificates.py seed_presentation.py ./
 COPY src/ src/
 
 RUN pip install --no-cache-dir -e .

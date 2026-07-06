@@ -48,3 +48,10 @@ docker-build:
 docker-run:
 	docker compose up --build
 
+seed-demo:
+	python3 seed_presentation.py
+
+seed-demo-docker:
+	docker compose cp seed_presentation.py certmanager:/app/seed_presentation.py
+	docker compose exec certmanager python /app/seed_presentation.py
+

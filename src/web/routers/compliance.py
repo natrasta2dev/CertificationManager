@@ -1,7 +1,7 @@
 """Routes conformité et rapports."""
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from ...core.compliance import ComplianceScanner
 from ...core.reports import ReportGenerator
@@ -35,6 +35,53 @@ async def scan_certificate_compliance(cert_id: str, _: User = Depends(RequireVie
         raise HTTPException(status_code=404, detail="Certificat introuvable")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/compliance/dashboard", response_class=JSONResponse)
+async def compliance_dashboard(_: User = Depends(RequireViewer)):
+    """Tableau de bord conformité Mozilla/NIST."""
+    managers = get_managers()
+    scanner = ComplianceScanner(managers.storage)
+    return {"success": True, "data": scanner.guidelines_dashboard()}
+
+
+@router.get("/reports/compliance.pdf")
+async def export_compliance_pdf(_: User = Depends(RequireViewer)):
+    managers = get_managers()
+    scanner = ComplianceScanner(managers.storage)
+    dashboard = scanner.guidelines_dashboard()
+    pdf_bytes = ReportGenerator(managers.storage).compliance_pdf(dashboard)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=compliance.pdf"},
+    )
+
+
+@router.get("/reports/expiration.pdf")
+async def export_expiration_pdf(_: User = Depends(RequireViewer)):
+    managers = get_managers()
+    certs = managers.storage.list_certificates()
+    pdf_bytes = ReportGenerator(managers.storage).expiration_pdf(certs)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=expiration.pdf"},
+    )
+
+
+@router.get("/reports/audit.pdf")
+async def export_audit_pdf(_: User = Depends(RequireViewer)):
+    from ...core.audit import AuditLogger
+
+    managers = get_managers()
+    logs = AuditLogger(str(managers.storage.storage_path)).list_logs(limit=200)
+    pdf_bytes = ReportGenerator(managers.storage).audit_pdf(logs)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=audit.pdf"},
+    )
 
 
 @router.get("/reports/certificates.csv", response_class=PlainTextResponse)

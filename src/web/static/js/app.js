@@ -54,10 +54,10 @@ async function checkAuthOnLoad() {
                 currentUserRole = meData.data.role;
             }
             if (meData?.data?.role === 'admin') {
-                document.getElementById('nav-audit')?.style.setProperty('display', 'inline-flex');
-                document.getElementById('nav-admin')?.style.setProperty('display', 'inline-flex');
+                document.getElementById('nav-audit')?.style.setProperty('display', 'flex');
+                document.getElementById('nav-admin')?.style.setProperty('display', 'flex');
             } else if (result?.data?.auth_enabled) {
-                document.getElementById('nav-audit')?.style.setProperty('display', 'inline-flex');
+                document.getElementById('nav-audit')?.style.setProperty('display', 'flex');
             }
         }
         updateSettingsFormAccess();
@@ -150,16 +150,37 @@ function initializeTabs() {
     });
 }
 
+const PAGE_TITLES = {
+    certificates: { title: 'Certificats', subtitle: 'Inventaire et cycle de vie PKI' },
+    generate: { title: 'Générer', subtitle: 'Créer un certificat serveur' },
+    csr: { title: 'CSR', subtitle: 'Certificate Signing Requests' },
+    alerts: { title: 'Alertes', subtitle: 'Surveillance des expirations' },
+    'import-export': { title: 'Import / Export', subtitle: 'Transfert de certificats' },
+    ca: { title: 'Autorité CA', subtitle: 'Gestion des autorités de certification' },
+    letsencrypt: { title: "Let's Encrypt", subtitle: 'Certificats ACME automatisés' },
+    client: { title: 'Certs Client', subtitle: 'Authentification mTLS' },
+    archives: { title: 'Archives', subtitle: 'Certificats archivés' },
+    settings: { title: 'Paramètres', subtitle: 'SMTP, webhooks, planificateur' },
+    audit: { title: 'Audit', subtitle: "Journal d'activité" },
+    admin: { title: 'Administration', subtitle: 'Gestion des utilisateurs' },
+};
+
 function switchTab(tab) {
-    // Update nav buttons
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.tab === tab);
     });
 
-    // Update tab content
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.toggle('active', content.id === `${tab}-tab`);
     });
+
+    const meta = PAGE_TITLES[tab];
+    if (meta) {
+        const titleEl = document.getElementById('page-title');
+        const subEl = document.getElementById('page-subtitle');
+        if (titleEl) titleEl.textContent = meta.title;
+        if (subEl) subEl.textContent = meta.subtitle;
+    }
 
     currentTab = tab;
 
@@ -315,6 +336,13 @@ function displayCertificates(certs) {
         return;
     }
 
+    if (typeof window.isTableView === 'function' && window.isTableView()
+        && typeof window.renderCertificatesTable === 'function') {
+        window.renderCertificatesTable(filteredCertificates, list);
+        updateBulkActionsBar();
+        return;
+    }
+
     list.innerHTML = filteredCertificates.map(cert => createCertificateCard(cert)).join('');
     
     // Add event listeners
@@ -363,21 +391,21 @@ function createCertificateCard(cert) {
     const isClient = certType === 'client';
     
     let statusClass = 'status-valid';
-    let statusText = '✅ Valide';
-    let statusIcon = 'fa-check-circle';
+    let badgeClass = 'badge-valid';
+    let statusText = 'Valide';
 
     if (isExpired) {
         statusClass = 'status-expired';
-        statusText = '❌ Expiré';
-        statusIcon = 'fa-times-circle';
+        badgeClass = 'badge-expired';
+        statusText = 'Expiré';
     } else if (daysLeft <= 7) {
-        statusClass = 'status-warning';
-        statusText = `🔴 ${daysLeft} jours`;
-        statusIcon = 'fa-exclamation-triangle';
+        statusClass = 'status-critical';
+        badgeClass = 'badge-critical';
+        statusText = `Critique · ${daysLeft}j`;
     } else if (daysLeft <= 30) {
         statusClass = 'status-warning';
-        statusText = `⚠️ ${daysLeft} jours`;
-        statusIcon = 'fa-exclamation-triangle';
+        badgeClass = 'badge-expiring';
+        statusText = `Expire bientôt · ${daysLeft}j`;
     }
 
     const expiresDate = cert.not_valid_after 
@@ -391,13 +419,12 @@ function createCertificateCard(cert) {
                 <div>
                     <div class="certificate-name">
                         ${cert.common_name || 'N/A'}
-                        ${isWildcard ? ' <span class="badge" style="background: #3b82f6; margin-left: 0.5rem;">Wildcard</span>' : ''}
-                        ${isClient ? ' <span class="badge" style="background: #8b5cf6; margin-left: 0.5rem;">Client</span>' : ''}
+                        ${isWildcard ? ' <span class="badge badge-info">Wildcard</span>' : ''}
+                        ${isClient ? ' <span class="badge badge-purple">Client</span>' : ''}
                     </div>
-                    <div class="certificate-id">${cert.id.substring(0, 8)}...</div>
+                    <div class="certificate-id">${cert.id.substring(0, 8)}…</div>
                 </div>
-                <span class="certificate-status ${statusClass}">
-                    <i class="fas ${statusIcon}"></i>
+                <span class="certificate-status ${statusClass} badge ${badgeClass}">
                     ${statusText}
                 </span>
             </div>
@@ -517,6 +544,9 @@ async function handleGenerateSubmit(e) {
         san_dns: parseSanField(formData.get('san_dns')),
         san_ip: parseSanField(formData.get('san_ip')),
     };
+
+    try {
+        const response = await apiFetch(`${API_BASE}/certificates`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -598,8 +628,9 @@ async function showCertificateDetails(certId) {
 
         if (result.success) {
             const cert = result.data;
-            modalTitle.textContent = `Certificat: ${cert.common_name || certId}`;
+            modalTitle.textContent = cert.common_name || certId;
             modalBody.innerHTML = createCertificateDetailsHTML(cert);
+            initModalTabs();
         } else {
             modalBody.innerHTML = '<p>Erreur lors du chargement des détails</p>';
         }
@@ -615,72 +646,110 @@ function createCertificateDetailsHTML(cert) {
         return new Date(dateStr).toLocaleString('fr-FR');
     };
 
+    const statusBadge = cert.is_expired
+        ? '<span class="badge badge-expired">Expiré</span>'
+        : (cert.days_until_expiry <= 7
+            ? `<span class="badge badge-critical">Critique · ${cert.days_until_expiry}j</span>`
+            : (cert.days_until_expiry <= 30
+                ? `<span class="badge badge-expiring">Expire bientôt · ${cert.days_until_expiry}j</span>`
+                : '<span class="badge badge-valid">Valide</span>'));
+
+    const sanList = cert.subject_alternative_names?.length
+        ? `<ul style="margin:0;padding-left:1.25rem;">${cert.subject_alternative_names.map(s => `<li>${s}</li>`).join('')}</ul>`
+        : '<p class="text-muted">Aucun SAN</p>';
+
     return `
-        <div class="modal-info">
-            <div class="modal-info-item">
-                <div class="modal-info-label">Nom Commun</div>
-                <div class="modal-info-value">${cert.common_name || 'N/A'}</div>
-            </div>
-            <div class="modal-info-item">
-                <div class="modal-info-label">ID</div>
-                <div class="modal-info-value" style="font-family: monospace; font-size: 0.75rem;">${cert.id}</div>
-            </div>
-            <div class="modal-info-item">
-                <div class="modal-info-label">Numéro de série</div>
-                <div class="modal-info-value" style="font-family: monospace; font-size: 0.75rem;">${cert.serial_number || 'N/A'}</div>
-            </div>
-            <div class="modal-info-item">
-                <div class="modal-info-label">Valide du</div>
-                <div class="modal-info-value">${formatDate(cert.not_valid_before)}</div>
-            </div>
-            <div class="modal-info-item">
-                <div class="modal-info-label">Valide jusqu'au</div>
-                <div class="modal-info-value">${formatDate(cert.not_valid_after)}</div>
-            </div>
-            <div class="modal-info-item">
-                <div class="modal-info-label">Statut</div>
-                <div class="modal-info-value">
-                    ${cert.is_expired ? '❌ Expiré' : '✅ Valide'}
-                    ${!cert.is_expired && cert.days_until_expiry ? ` (${cert.days_until_expiry} jours restants)` : ''}
+        <div class="modal-tab-panel active" data-panel="general">
+            <div class="modal-info">
+                <div class="modal-info-item">
+                    <div class="modal-info-label">Nom commun</div>
+                    <div class="modal-info-value">${cert.common_name || 'N/A'}</div>
                 </div>
+                <div class="modal-info-item">
+                    <div class="modal-info-label">Statut</div>
+                    <div class="modal-info-value">${statusBadge}</div>
+                </div>
+                <div class="modal-info-item">
+                    <div class="modal-info-label">ID</div>
+                    <div class="modal-info-value" style="font-family:monospace;font-size:0.75rem;">${cert.id}</div>
+                </div>
+                <div class="modal-info-item">
+                    <div class="modal-info-label">Série</div>
+                    <div class="modal-info-value" style="font-family:monospace;font-size:0.75rem;">${cert.serial_number || 'N/A'}</div>
+                </div>
+                <div class="modal-info-item">
+                    <div class="modal-info-label">Valide du</div>
+                    <div class="modal-info-value">${formatDate(cert.not_valid_before)}</div>
+                </div>
+                <div class="modal-info-item">
+                    <div class="modal-info-label">Valide jusqu'au</div>
+                    <div class="modal-info-value">${formatDate(cert.not_valid_after)}</div>
+                </div>
+                ${cert.organization ? `
+                <div class="modal-info-item">
+                    <div class="modal-info-label">Organisation</div>
+                    <div class="modal-info-value">${cert.organization}</div>
+                </div>` : ''}
+            </div>
+        </div>
+        <div class="modal-tab-panel" data-panel="san">
+            <div class="modal-info-item">
+                <div class="modal-info-label">Subject Alternative Names</div>
+                <div class="modal-info-value">${sanList}</div>
             </div>
             ${cert.subject ? `
-            <div class="modal-info-item">
+            <div class="modal-info-item" style="margin-top:1rem;">
                 <div class="modal-info-label">Sujet</div>
-                <div class="modal-info-value">${JSON.stringify(cert.subject, null, 2)}</div>
-            </div>
-            ` : ''}
+                <pre style="font-size:0.75rem;overflow:auto;background:var(--bg-subtle);padding:12px;border-radius:8px;">${JSON.stringify(cert.subject, null, 2)}</pre>
+            </div>` : ''}
+        </div>
+        <div class="modal-tab-panel" data-panel="chain">
             ${cert.issuer ? `
             <div class="modal-info-item">
                 <div class="modal-info-label">Émetteur</div>
-                <div class="modal-info-value">${JSON.stringify(cert.issuer, null, 2)}</div>
-            </div>
-            ` : ''}
-            ${cert.subject_alternative_names && cert.subject_alternative_names.length > 0 ? `
-            <div class="modal-info-item">
-                <div class="modal-info-label">Subject Alternative Names</div>
-                <div class="modal-info-value">${cert.subject_alternative_names.join(', ')}</div>
-            </div>
-            ` : ''}
+                <pre style="font-size:0.75rem;overflow:auto;background:var(--bg-subtle);padding:12px;border-radius:8px;">${JSON.stringify(cert.issuer, null, 2)}</pre>
+            </div>` : '<p class="text-muted">Informations émetteur indisponibles</p>'}
             ${cert.renewed_from ? `
-            <div class="modal-info-item">
+            <div class="modal-info-item" style="margin-top:1rem;">
                 <div class="modal-info-label">Renouvelé depuis</div>
-                <div class="modal-info-value">${cert.renewed_from.substring(0, 8)}...</div>
-            </div>
-            ` : ''}
+                <div class="modal-info-value">${cert.renewed_from}</div>
+            </div>` : ''}
         </div>
-        <div class="modal-actions" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); display: flex; gap: 1rem; flex-wrap: wrap;">
-            <button class="btn btn-secondary" onclick="verifyCertificateChain('${cert.id}')">
-                <i class="fas fa-link"></i> Vérifier chaîne CA
-            </button>
-            <button class="btn btn-primary" onclick="renewCertificate('${cert.id}'); closeModal();">
-                <i class="fas fa-sync-alt"></i> Renouveler
-            </button>
-            <button class="btn btn-secondary" onclick="closeModal()">
-                Fermer
-            </button>
+        <div class="modal-tab-panel" data-panel="actions">
+            <div class="modal-actions" style="border:none;margin:0;padding:0;">
+                <button class="btn btn-secondary" onclick="verifyCertificateChain('${cert.id}')">
+                    <i class="fas fa-link"></i> Vérifier chaîne CA
+                </button>
+                <button class="btn btn-primary" onclick="renewCertificate('${cert.id}'); closeModal();">
+                    <i class="fas fa-sync-alt"></i> Renouveler
+                </button>
+                <button class="btn btn-secondary" onclick="bulkExportSingle('${cert.id}')">
+                    <i class="fas fa-download"></i> Exporter
+                </button>
+                <button class="btn btn-danger" onclick="deleteCertificate('${cert.id}'); closeModal();">
+                    <i class="fas fa-trash"></i> Supprimer
+                </button>
+            </div>
         </div>
     `;
+}
+
+function initModalTabs() {
+    const tabs = document.querySelectorAll('#modal-tabs .modal-tab');
+    const panels = document.querySelectorAll('#modal-body .modal-tab-panel');
+    tabs.forEach(tab => {
+        tab.onclick = () => {
+            const id = tab.dataset.modalTab;
+            tabs.forEach(t => t.classList.toggle('active', t === tab));
+            panels.forEach(p => p.classList.toggle('active', p.dataset.panel === id));
+        };
+    });
+}
+
+function bulkExportSingle(certId) {
+    selectedCertificates.clear();
+    selectedCertificates.add(certId);
+    bulkExport();
 }
 
 function closeModal() {
@@ -2125,15 +2194,21 @@ async function loadAuditLogs() {
             container.innerHTML = '<p class="empty-state">Aucune entrée d\'audit</p>';
             return;
         }
-        container.innerHTML = result.data.map(log => `
-            <div class="alert-card ${log.success ? '' : 'alert-critical'}">
-                <div class="alert-header">
-                    <span class="alert-level">${log.action}</span>
-                    <span class="alert-date">${new Date(log.timestamp).toLocaleString('fr-FR')}</span>
-                </div>
-                <p><strong>${log.username}</strong> — ${log.resource_type || ''} ${log.resource_id || ''}</p>
-            </div>
-        `).join('');
+        container.innerHTML = `
+            <table class="data-table" role="table" aria-label="Journal d'audit">
+            <thead><tr>
+                <th>Date</th><th>Utilisateur</th><th>Action</th><th>Ressource</th>
+            </tr></thead>
+            <tbody>
+            ${result.data.map(log => `
+                <tr>
+                    <td>${new Date(log.timestamp).toLocaleString('fr-FR')}</td>
+                    <td><strong>${log.username}</strong></td>
+                    <td><span class="badge badge-info">${log.action}</span></td>
+                    <td>${log.resource_type || ''} ${log.resource_id ? log.resource_id.substring(0, 8) + '…' : ''}</td>
+                </tr>
+            `).join('')}
+            </tbody></table>`;
     } catch (e) {
         container.innerHTML = '<p class="empty-state">Erreur</p>';
     }
@@ -2158,9 +2233,9 @@ async function loadUsers() {
         const response = await apiFetch(`${API_BASE}/auth/users`);
         const result = await response.json();
         if (!result.success) { container.innerHTML = '<p>Accès refusé</p>'; return; }
-        container.innerHTML = `<table class="data-table"><thead><tr><th>Utilisateur</th><th>Rôle</th><th></th></tr></thead><tbody>
-            ${result.data.map(u => `<tr><td>${u.username}</td><td>${u.role}</td>
-            <td><button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">Supprimer</button></td></tr>`).join('')}
+        container.innerHTML = `<table class="data-table" role="table" aria-label="Utilisateurs"><thead><tr><th>Utilisateur</th><th>Rôle</th><th></th></tr></thead><tbody>
+            ${result.data.map(u => `<tr><td><strong>${u.username}</strong></td><td><span class="badge badge-info">${u.role}</span></td>
+            <td><button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')"><i class="fas fa-trash"></i></button></td></tr>`).join('')}
         </tbody></table>`;
     } catch (e) { container.innerHTML = '<p>Erreur</p>'; }
 }
@@ -2510,3 +2585,62 @@ async function runComplianceScan() {
         if (container) container.textContent = 'Erreur de scan';
     }
 }
+
+async function loadComplianceDashboard() {
+    const container = document.getElementById('compliance-dashboard');
+    if (!container) return;
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Chargement…</div>';
+    try {
+        const response = await apiFetch(`${API_BASE}/compliance/dashboard`);
+        const result = await response.json();
+        if (!result.success) throw new Error('failed');
+        const d = result.data;
+        const g = d.guidelines?.mozilla || {};
+        const nist = d.guidelines?.nist_alignment_score ?? 0;
+        const checks = [
+            { key: 'signature_sha256', label: 'Signature SHA-256' },
+            { key: 'rsa_key_2048', label: 'Clé RSA ≥ 2048' },
+            { key: 'not_expired', label: 'Non expiré' },
+            { key: 'validity_under_825_days', label: 'Validité < 825 jours' },
+        ];
+        container.innerHTML = `
+            <div class="compliance-score-ring card">
+                <div class="compliance-score-value">${d.compliance_rate ?? 0}%</div>
+                <div class="text-muted">Taux de conformité · Score NIST ${nist}%</div>
+            </div>
+            ${checks.map(c => {
+                const m = g[c.key] || { pass: 0, fail: 0 };
+                const total = m.pass + m.fail || 1;
+                const pct = Math.round((m.pass / total) * 100);
+                const cls = pct >= 90 ? '' : pct >= 70 ? 'warn' : 'bad';
+                return `<div class="compliance-bar-row">
+                    <span class="compliance-bar-label">${c.label}</span>
+                    <div class="compliance-bar-track"><div class="compliance-bar-fill ${cls}" style="width:${pct}%"></div></div>
+                    <span>${m.pass}/${total}</span>
+                </div>`;
+            }).join('')}
+        `;
+    } catch (e) {
+        container.innerHTML = '<p class="text-muted">Impossible de charger le dashboard</p>';
+    }
+}
+
+function toggleCertViewUI() {
+    if (typeof window.toggleCertView === 'function') {
+        window.toggleCertView();
+        displayCertificates(certificates);
+        const btn = document.getElementById('cert-view-toggle');
+        if (btn) {
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.className = window.isTableView() ? 'fas fa-th-large' : 'fas fa-table';
+            }
+        }
+    }
+}
+
+window.onLiveAlerts = function(payload) {
+    if (currentTab === 'alerts' && typeof refreshAlerts === 'function') {
+        refreshAlerts();
+    }
+};

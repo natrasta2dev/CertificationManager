@@ -18,6 +18,8 @@ from ...core.users import User, UserManager, UserRole
 from ..audit_hooks import audit_action
 from ..auth_deps import RequireAdmin, get_current_user, get_user_manager
 
+from ..template_utils import render_template
+
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
@@ -35,7 +37,7 @@ class UserCreateRequest(BaseModel):
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Page de connexion."""
-    return templates.TemplateResponse("login.html", {"request": request})
+    return render_template(templates, "login.html", {"request": request})
 
 
 @router.post("/auth/login", response_class=JSONResponse)

@@ -18,20 +18,19 @@
 | Epic 3 — Sécurité & auth | ✅ | JWT, users, rôles, audit, CSRF, rate limit |
 | Epic 4 — PKI & core | ✅ | CA, backup, conformité, san_ip, archives |
 | Epic 5 — Automatisation | ✅ | Scheduler, SMTP, webhooks, rapport hebdo |
-| Epic 6 — Interface web v2 | 🔧 | Pagination, archives, CSR, paramètres, mode sombre, raccourcis |
-| Epic 7 — CLI v2 | 🔧 | config, san_ip, version dynamique |
-| Epic 8 — API v2 | 🔧 | Pagination, métriques, rate-limit headers, config API |
-| Epic 10 — Rapports | 🔧 | CSV, scan conformité |
+| Epic 6 — Interface web v2 | 🔧 | Modules ES, i18n, tableau, wizard, drag-drop, SSE alertes |
+| Epic 7 — CLI v2 | 🔧 | `--format` json/yaml/csv/table, complétion shell, avertissement clés |
+| Epic 8 — API v2 | 🔧 | `/api/v1/`, bulk, WebSocket/SSE, idempotence |
+| Epic 10 — Rapports | 🔧 | PDF conformité/expiration/audit, dashboard Mozilla/NIST, rapport mensuel |
 | Epic 12 — Documentation | 🔧 | CHANGELOG, SECURITY, DEPLOYMENT |
 | Epic 13 — Innovations | 🔧 | Prometheus `/api/metrics` |
 
 ### Reste pour v2.1+
 
 - Couverture 80 %, pre-commit, mypy strict
-- API versioning `/api/v1/`, WebSockets alertes
 - ACME natif, export K8s/Vault
-- Refactoring frontend (modules ES)
-- PDF rapports, i18n
+- Schémas OpenAPI exhaustifs (descriptions Field)
+- Refactoring complet `app.js` (logique métier dans modules)
 
 Voir sections détaillées ci-dessous pour le détail item par item.
 
@@ -96,27 +95,48 @@ Scheduler, SMTP, webhooks, rapport hebdomadaire — **complet**.
 - [x] Pagination, archives, CSR liste, paramètres, mode sombre
 - [x] Vérification chaîne CA (modal), scan conformité
 - [x] Raccourcis clavier (`/`, `n`, `r`, `Esc`)
-- [ ] WebSockets, i18n, refactoring `app.js`
+- [x] Modules ES (`main.js`, api, i18n, alerts-live, table-view, wizard, import-drop)
+- [x] i18n FR/EN (toggle), attributs ARIA de base
+- [x] Vue tableau, wizard création, drag & drop import
+- [x] SSE alertes temps réel (`/api/alerts/stream`)
+- [ ] WebSocket client (endpoint serveur prêt)
+- [ ] Refactoring complet de `app.js` (~2500 lignes)
 
 ---
 
 ## Epic 7 — CLI v2 🔧
 
 - [x] `certmanager config`, `--san-ip`, version dynamique, backup/restore
-- [ ] Formats sortie json/yaml/csv, auto-complétion shell
+- [x] `--format table|json|yaml|csv` sur `list`, `status`, `alerts`, `expiring`
+- [x] `certmanager completion` (bash/zsh/fish)
+- [x] Avertissement sécurité à la génération de clés
 
 ---
 
 ## Epic 8 — API v2 🔧
 
 - [x] Pagination, rate-limit headers, `/api/config`, `/api/metrics`
-- [ ] Versioning `/api/v1/`, bulk endpoints officiels, WebSocket
+- [x] Versioning `/api/v1/` (miroir de `/api`)
+- [x] `POST /certificates/bulk-delete`, `bulk-renew`
+- [x] WebSocket `/ws/alerts`, SSE `/alerts/stream`
+- [x] Idempotence `Idempotency-Key` sur POST critiques
+- [ ] Schémas OpenAPI complets (descriptions Pydantic)
 
 ---
 
 ## Epic 9–13 — Backlog
 
-ACME natif, export K8s/Vault, cache performance, PDF rapports, HSM — **v2.1+**.
+ACME natif, export K8s/Vault, cache performance, HSM — **v2.1+**.
+
+---
+
+## Epic 10 — Rapports 🔧
+
+- [x] CSV inventaire / archives
+- [x] Scan conformité
+- [x] Dashboard Mozilla/NIST (`/api/compliance/dashboard`)
+- [x] Export PDF (conformité, expiration, audit)
+- [x] Rapport mensuel email (scheduler `monthly-report`)
 
 ---
 

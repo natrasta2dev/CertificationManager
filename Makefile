@@ -1,12 +1,16 @@
-.PHONY: install test lint format clean help
+.PHONY: install test lint format clean help ci docker-build docker-run
 
 help:
 	@echo "Commandes disponibles:"
-	@echo "  make install    - Installer les dépendances"
-	@echo "  make test       - Lancer les tests"
-	@echo "  make lint       - Vérifier le code avec flake8"
-	@echo "  make format     - Formater le code avec black"
-	@echo "  make clean      - Nettoyer les fichiers temporaires"
+	@echo "  make install      - Installer les dépendances"
+	@echo "  make test         - Lancer les tests"
+	@echo "  make test-cov     - Tests avec couverture"
+	@echo "  make ci           - Pipeline locale (lint + tests)"
+	@echo "  make lint         - Vérifier le code avec flake8"
+	@echo "  make format       - Formater le code avec black"
+	@echo "  make docker-build - Construire l'image Docker"
+	@echo "  make docker-run   - Lancer via docker-compose"
+	@echo "  make clean        - Nettoyer les fichiers temporaires"
 
 install:
 	pip install -r requirements.txt
@@ -35,4 +39,12 @@ clean:
 	find . -type d -name ".pytest_cache" -exec rm -r {} + 2>/dev/null || true
 	find . -type d -name ".mypy_cache" -exec rm -r {} + 2>/dev/null || true
 	rm -rf htmlcov/ .coverage dist/ build/
+
+ci: lint test
+
+docker-build:
+	docker build -t certification-manager:latest .
+
+docker-run:
+	docker compose up --build
 

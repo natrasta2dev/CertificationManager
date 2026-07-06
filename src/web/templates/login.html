@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connexion — CertificationManager</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .login-container {
+            max-width: 400px;
+            margin: 80px auto;
+            padding: 2rem;
+            background: var(--card-bg, #fff);
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .login-container h1 { text-align: center; margin-bottom: 1.5rem; }
+        .login-container .form-group { margin-bottom: 1rem; }
+        .login-container label { display: block; margin-bottom: 0.25rem; font-weight: 500; }
+        .login-container input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+        }
+        .login-container button {
+            width: 100%;
+            padding: 0.75rem;
+            margin-top: 1rem;
+            background: var(--primary, #2563eb);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        .login-container button:hover { opacity: 0.9; }
+        .error-msg { color: #dc2626; text-align: center; margin-top: 1rem; display: none; }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>🔐 CertificationManager</h1>
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">Nom d'utilisateur</label>
+                <input type="text" id="username" name="username" required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="password">Mot de passe</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password">
+            </div>
+            <button type="submit">Se connecter</button>
+            <p class="error-msg" id="error-msg"></p>
+        </form>
+    </div>
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorEl = document.getElementById('error-msg');
+            errorEl.style.display = 'none';
+
+            const formData = new URLSearchParams();
+            formData.append('username', document.getElementById('username').value);
+            formData.append('password', document.getElementById('password').value);
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formData,
+                });
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    localStorage.setItem('auth_token', result.data.access_token);
+                    localStorage.setItem('refresh_token', result.data.refresh_token);
+                    localStorage.setItem('csrf_token', result.data.csrf_token);
+                    localStorage.setItem('auth_user', JSON.stringify(result.data.user));
+                    window.location.href = '/';
+                } else {
+                    errorEl.textContent = result.detail || 'Identifiants incorrects';
+                    errorEl.style.display = 'block';
+                }
+            } catch {
+                errorEl.textContent = 'Erreur de connexion au serveur';
+                errorEl.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>

@@ -167,13 +167,15 @@ class LetsEncryptManager:
             )
 
             # Ajouter les métadonnées Let's Encrypt
-            all_metadata = self.storage._load_metadata()
-            if cert_id in all_metadata:
-                all_metadata[cert_id]["letsencrypt"] = True
-                all_metadata[cert_id]["letsencrypt_domains"] = domains
-                all_metadata[cert_id]["letsencrypt_staging"] = staging
-                all_metadata[cert_id]["letsencrypt_obtained_at"] = datetime.now(timezone.utc).isoformat()
-                self.storage._save_metadata(all_metadata)
+            self.storage.update_metadata(
+                cert_id,
+                {
+                    "letsencrypt": True,
+                    "letsencrypt_domains": domains,
+                    "letsencrypt_staging": staging,
+                    "letsencrypt_obtained_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
 
             return cert_id
 

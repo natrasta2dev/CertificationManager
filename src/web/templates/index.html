@@ -17,6 +17,9 @@
                     <i class="fas fa-certificate"></i>
                     <h1>CertificationManager</h1>
                 </div>
+                <button class="btn btn-icon theme-toggle" id="theme-toggle" title="Mode sombre" onclick="toggleTheme()">
+                    <i class="fas fa-moon"></i>
+                </button>
                 <nav class="nav">
                     <button class="nav-btn active" data-tab="certificates">
                         <i class="fas fa-list"></i> Certificats
@@ -42,6 +45,18 @@
                     </button>
                     <button class="nav-btn" data-tab="client">
                         <i class="fas fa-user-shield"></i> Certificats Client
+                    </button>
+                    <button class="nav-btn" data-tab="archives">
+                        <i class="fas fa-archive"></i> Archives
+                    </button>
+                    <button class="nav-btn" data-tab="settings">
+                        <i class="fas fa-cog"></i> Paramètres
+                    </button>
+                    <button class="nav-btn" data-tab="audit" id="nav-audit" style="display:none;">
+                        <i class="fas fa-clipboard-list"></i> Audit
+                    </button>
+                    <button class="nav-btn" data-tab="admin" id="nav-admin" style="display:none;">
+                        <i class="fas fa-users-cog"></i> Admin
                     </button>
                 </nav>
             </div>
@@ -198,6 +213,22 @@
                     <!-- Les certificats seront chargés ici -->
                 </div>
 
+                <div id="certificates-pagination" class="pagination-bar" style="display: none;">
+                    <button class="btn btn-sm btn-secondary" id="cert-page-prev" onclick="changeCertPage(-1)">
+                        <i class="fas fa-chevron-left"></i> Précédent
+                    </button>
+                    <span id="cert-page-info">Page 1 / 1</span>
+                    <button class="btn btn-sm btn-secondary" id="cert-page-next" onclick="changeCertPage(1)">
+                        Suivant <i class="fas fa-chevron-right"></i>
+                    </button>
+                    <select id="cert-page-limit" onchange="changeCertLimit()" class="pagination-limit">
+                        <option value="10">10 / page</option>
+                        <option value="20" selected>20 / page</option>
+                        <option value="50">50 / page</option>
+                        <option value="100">100 / page</option>
+                    </select>
+                </div>
+
                 <div id="loading" class="loading">
                     <i class="fas fa-spinner fa-spin"></i> Chargement...
                 </div>
@@ -281,6 +312,11 @@
                         <input type="text" id="san-dns" name="san_dns" 
                                placeholder="www.example.com, api.example.com, *.example.com (séparés par des virgules)">
                         <small>Plusieurs noms séparés par des virgules. Support des wildcards : *.example.com</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="san-ip">Subject Alternative Names (IP)</label>
+                        <input type="text" id="san-ip" name="san_ip" 
+                               placeholder="192.168.1.1, 10.0.0.1">
                     </div>
 
                     <div class="form-actions">
@@ -384,6 +420,11 @@
                         <input type="text" id="csr-san-dns" name="san_dns" 
                                placeholder="www.example.com, api.example.com">
                     </div>
+                    <div class="form-group">
+                        <label for="csr-san-ip">Subject Alternative Names (IP)</label>
+                        <input type="text" id="csr-san-ip" name="san_ip" 
+                               placeholder="192.168.1.1">
+                    </div>
 
                     <div class="form-actions">
                         <button type="submit" class="btn btn-primary">
@@ -394,6 +435,16 @@
                         </button>
                     </div>
                 </form>
+
+                <div class="section-header" style="margin-top: 2rem;">
+                    <h3><i class="fas fa-list"></i> CSR en attente</h3>
+                    <button class="btn btn-secondary btn-sm" onclick="loadCSRList()">
+                        <i class="fas fa-sync-alt"></i> Actualiser
+                    </button>
+                </div>
+                <div id="csr-list-container" class="csr-list">
+                    <p class="empty-state">Aucune CSR</p>
+                </div>
             </section>
 
             <!-- Import/Export Tab -->
@@ -747,6 +798,182 @@
                         </div>
                     </div>
                 </div>
+            </section>
+
+            <!-- Audit Tab -->
+            <section id="audit-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-clipboard-list"></i> Journal d'audit</h2>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="exportAuditLogs('json')">
+                            <i class="fas fa-download"></i> Export JSON
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportAuditLogs('csv')">
+                            <i class="fas fa-file-csv"></i> Export CSV
+                        </button>
+                        <button class="btn btn-primary" onclick="loadAuditLogs()">
+                            <i class="fas fa-sync-alt"></i> Actualiser
+                        </button>
+                    </div>
+                </div>
+                <div id="audit-logs-container" class="alerts-container"></div>
+            </section>
+
+            <!-- Settings Tab -->
+            <section id="settings-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-cog"></i> Paramètres</h2>
+                    <button class="btn btn-primary" id="settings-save-btn" onclick="saveSettings()">
+                        <i class="fas fa-save"></i> Enregistrer
+                    </button>
+                </div>
+
+                <div class="settings-grid">
+                    <div class="card">
+                        <h3><i class="fas fa-envelope"></i> Notifications SMTP</h3>
+                        <form id="settings-notifications-form" class="form">
+                            <div class="form-group">
+                                <label><input type="checkbox" id="smtp-enabled"> Activer les emails</label>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="smtp-host">Serveur SMTP</label>
+                                    <input type="text" id="smtp-host" placeholder="smtp.example.com">
+                                </div>
+                                <div class="form-group">
+                                    <label for="smtp-port">Port</label>
+                                    <input type="number" id="smtp-port" value="587">
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="smtp-user">Utilisateur</label>
+                                    <input type="text" id="smtp-user">
+                                </div>
+                                <div class="form-group">
+                                    <label for="smtp-password">Mot de passe</label>
+                                    <input type="password" id="smtp-password" placeholder="Laisser vide pour conserver">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="smtp-from">Expéditeur</label>
+                                <input type="email" id="smtp-from" placeholder="certmanager@example.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="smtp-to">Destinataires (séparés par des virgules)</label>
+                                <input type="text" id="smtp-to" placeholder="admin@example.com">
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="smtp-use-tls" checked> Utiliser TLS</label>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h3><i class="fas fa-plug"></i> Webhooks</h3>
+                        <form id="settings-webhooks-form" class="form">
+                            <div class="form-group">
+                                <label><input type="checkbox" id="webhook-enabled"> Activer les webhooks</label>
+                            </div>
+                            <div class="form-group">
+                                <label for="webhook-secret">Secret HMAC</label>
+                                <input type="password" id="webhook-secret" placeholder="Laisser vide pour conserver">
+                            </div>
+                            <div class="form-group">
+                                <label for="webhook-endpoints">URLs (une par ligne)</label>
+                                <textarea id="webhook-endpoints" rows="4" placeholder="https://hooks.example.com/certmanager"></textarea>
+                            </div>
+                            <p class="form-hint" id="webhook-events-hint"></p>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h3><i class="fas fa-clock"></i> Planificateur</h3>
+                        <form id="settings-scheduler-form" class="form">
+                            <div class="form-group">
+                                <label for="sched-interval">Intervalle (minutes)</label>
+                                <input type="number" id="sched-interval" min="5" value="60">
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="sched-auto-renew"> Renouvellement automatique</label>
+                            </div>
+                            <div class="form-group">
+                                <label for="sched-renew-days">Renouveler avant expiration (jours)</label>
+                                <input type="number" id="sched-renew-days" value="30">
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="sched-alert-email"> Alertes par email</label>
+                            </div>
+                            <div class="form-group">
+                                <label><input type="checkbox" id="sched-alert-webhook"> Alertes par webhook</label>
+                            </div>
+                            <div id="scheduler-status" class="form-hint"></div>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="runSchedulerJob('weekly-report')">
+                                <i class="fas fa-paper-plane"></i> Envoyer rapport hebdomadaire
+                            </button>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h3><i class="fas fa-shield-virus"></i> Conformité & rapports</h3>
+                        <p class="form-hint">Scan algorithmes faibles, clés RSA &lt; 2048, certificats expirés.</p>
+                        <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:1rem;">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="runComplianceScan()">
+                                <i class="fas fa-search"></i> Scanner conformité
+                            </button>
+                            <a class="btn btn-secondary btn-sm" href="/api/reports/certificates.csv" download>
+                                <i class="fas fa-file-csv"></i> Export CSV inventaire
+                            </a>
+                            <a class="btn btn-secondary btn-sm" href="/api/reports/archives.csv" download>
+                                <i class="fas fa-file-csv"></i> Export CSV archives
+                            </a>
+                        </div>
+                        <div id="compliance-results" class="form-hint"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Archives Tab -->
+            <section id="archives-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-archive"></i> Certificats archivés</h2>
+                    <button class="btn btn-primary" onclick="loadArchives()">
+                        <i class="fas fa-sync-alt"></i> Actualiser
+                    </button>
+                </div>
+                <div id="archives-list" class="certificates-grid">
+                    <p class="empty-state">Aucun certificat archivé</p>
+                </div>
+            </section>
+
+            <!-- Admin Tab -->
+            <section id="admin-tab" class="tab-content">
+                <div class="section-header">
+                    <h2><i class="fas fa-users-cog"></i> Gestion des utilisateurs</h2>
+                </div>
+                <div class="form-card" style="max-width: 500px; margin-bottom: 2rem;">
+                    <h3>Créer un utilisateur</h3>
+                    <form id="create-user-form" onsubmit="createUser(event)">
+                        <div class="form-group">
+                            <label for="new-username">Nom d'utilisateur</label>
+                            <input type="text" id="new-username" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-password">Mot de passe</label>
+                            <input type="password" id="new-password" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="new-role">Rôle</label>
+                            <select id="new-role">
+                                <option value="viewer">Viewer (lecture)</option>
+                                <option value="operator">Operator (écriture)</option>
+                                <option value="admin">Admin</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Créer</button>
+                    </form>
+                </div>
+                <div id="users-list-container"></div>
             </section>
         </main>
 

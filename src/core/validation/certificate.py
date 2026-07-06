@@ -4,6 +4,29 @@ from datetime import datetime, timezone
 from typing import List, Tuple
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
+
+
+def verify_certificate_signature(
+    cert: x509.Certificate, issuer_cert: x509.Certificate
+) -> None:
+    """Vérifie la signature d'un certificat avec la clé publique de l'émetteur."""
+    public_key = issuer_cert.public_key()
+    if isinstance(public_key, rsa.RSAPublicKey):
+        public_key.verify(
+            cert.signature,
+            cert.tbs_certificate_bytes,
+            padding.PKCS1v15(),
+            cert.signature_hash_algorithm,
+        )
+    elif isinstance(public_key, ec.EllipticCurvePublicKey):
+        public_key.verify(
+            cert.signature,
+            cert.tbs_certificate_bytes,
+            ec.ECDSA(cert.signature_hash_algorithm),
+        )
+    else:
+        raise TypeError(f"Type de clé non supporté: {type(public_key)}")
 
 
 class CertificateValidator:
@@ -103,14 +126,10 @@ class CertificateValidator:
             errors.append("Aucune CA trouvée pour valider la chaîne")
             is_valid = False
         else:
-            # Vérifier la signature
             try:
-                # Pour une validation complète, il faudrait vérifier la signature
-                # avec la clé publique de la CA, mais cela nécessite la clé publique
-                # Pour l'instant, on vérifie juste que la CA existe
-                pass
+                verify_certificate_signature(cert, ca_cert)
             except Exception as e:
-                errors.append(f"Erreur lors de la validation de la chaîne: {e}")
+                errors.append(f"Échec de vérification de signature: {e}")
                 is_valid = False
 
         return is_valid, errors

@@ -1,8 +1,8 @@
 """Tests pour le module validation."""
 
 import pytest
-from datetime import datetime, timedelta
-from cryptography import x509
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 from src.core.certificate import CertificateManager
 from src.core.validation import CertificateValidator
@@ -28,18 +28,22 @@ class TestCertificateValidator:
     def test_validate_expired_certificate(self):
         """Test validation d'un certificat expiré."""
         manager = CertificateManager()
-        # Créer un certificat avec validité négative (expiré)
         cert, _, _ = manager.generate_self_signed_cert(
             "test.example.com",
-            validity_days=-1
+            validity_days=365,
         )
 
         validator = CertificateValidator()
-        is_valid, errors = validator.validate_certificate(cert)
+        future_time = cert.not_valid_after_utc + timedelta(days=1)
 
-        # Le certificat devrait être considéré comme invalide car expiré
-        # Note: La génération avec validité négative peut ne pas fonctionner
-        # mais on teste quand même la logique de validation
+        with patch("src.core.validation.certificate.datetime") as mock_datetime:
+            mock_datetime.now.return_value = future_time
+            mock_datetime.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+
+            is_valid, errors = validator.validate_certificate(cert)
+
+        assert is_valid is False
+        assert any("expiré" in error.lower() for error in errors)
 
     def test_get_certificate_info(self):
         """Test extraction d'informations d'un certificat."""

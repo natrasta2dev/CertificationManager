@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "certification-manager"
-version = "0.1.0"
+version = "0.2.0"
 description = "Application système de gestion de certificats cryptographiques"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -28,9 +28,14 @@ classifiers = [
 
 dependencies = [
     "cryptography>=41.0.0",
-    "pyOpenSSL>=23.0.0",
     "click>=8.1.0",
     "python-dotenv>=1.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.6",
+    "bcrypt>=4.0.0",
+    "PyJWT>=2.8.0",
 ]
 
 [project.optional-dependencies]

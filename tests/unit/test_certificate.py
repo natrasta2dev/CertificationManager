@@ -1,7 +1,7 @@
 """Tests pour le module certificate."""
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 
@@ -40,11 +40,13 @@ class TestCertificateManager:
             validity_days=730
         )
 
-        subject_dict = dict(cert.subject)
+        subject_dict = {attr.oid: attr.value for attr in cert.subject}
         assert subject_dict.get(NameOID.COUNTRY_NAME) == "FR"
         assert subject_dict.get(NameOID.STATE_OR_PROVINCE_NAME) == "Ile-de-France"
         assert subject_dict.get(NameOID.LOCALITY_NAME) == "Paris"
         assert subject_dict.get(NameOID.ORGANIZATION_NAME) == "Test Org"
+        assert metadata["organization"] == "Test Org"
+        assert metadata["country"] == "FR"
 
     def test_generate_self_signed_cert_with_san(self):
         """Test génération certificat avec SAN."""
@@ -102,8 +104,8 @@ class TestCertificateManager:
             validity_days=30
         )
 
-        now = datetime.utcnow()
-        assert cert.not_valid_before <= now
-        assert cert.not_valid_after >= now + timedelta(days=29)
-        assert cert.not_valid_after <= now + timedelta(days=31)
+        now = datetime.now(timezone.utc)
+        assert cert.not_valid_before_utc <= now
+        assert cert.not_valid_after_utc >= now + timedelta(days=29)
+        assert cert.not_valid_after_utc <= now + timedelta(days=31)
 

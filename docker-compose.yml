@@ -1,0 +1,15 @@
+services:
+  certmanager:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - certmanager_data:/data/.certmanager
+    environment:
+      - CERTMANAGER_STORAGE_PATH=/data/.certmanager
+      - CERTMANAGER_AUTH_ENABLED=false
+      - CERTMANAGER_RATE_LIMIT_ENABLED=true
+    restart: unless-stopped
+
+volumes:
+  certmanager_data:

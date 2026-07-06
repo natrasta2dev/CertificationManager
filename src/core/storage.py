@@ -4,7 +4,7 @@ import os
 import json
 from pathlib import Path
 from typing import List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
@@ -24,13 +24,25 @@ class SecureStorage:
                          Par défaut: ~/.certmanager
         """
         if storage_path is None:
-            storage_path = os.path.expanduser("~/.certmanager")
+            from ..config import get_settings
+            storage_path = get_settings().storage_path
 
         self.storage_path = Path(storage_path)
         self.certs_dir = self.storage_path / "certificates"
         self.keys_dir = self.storage_path / "keys"
         self.csr_dir = self.storage_path / "csr"
         self.metadata_file = self.storage_path / "metadata.json"
+
+        from ..config import get_settings
+        settings = get_settings()
+        self._key_password: Optional[bytes] = None
+        if settings.encrypt_keys:
+            if not settings.storage_password:
+                raise ValueError(
+                    "CERTMANAGER_STORAGE_PASSWORD est requis lorsque "
+                    "CERTMANAGER_ENCRYPT_KEYS=true"
+                )
+            self._key_password = settings.storage_password.encode("utf-8")
 
         # Créer les répertoires avec permissions sécurisées
         self._create_directories()
@@ -60,10 +72,21 @@ class SecureStorage:
             return {}
 
     def _save_metadata(self, metadata: Dict):
-        """Sauvegarde les métadonnées dans le fichier JSON."""
-        with open(self.metadata_file, "w", encoding="utf-8") as f:
+        """Sauvegarde les métadonnées de façon atomique."""
+        tmp_file = self.metadata_file.with_suffix(".json.tmp")
+        with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2, ensure_ascii=False)
+        os.chmod(tmp_file, 0o600)
+        tmp_file.replace(self.metadata_file)
         os.chmod(self.metadata_file, 0o600)
+
+    def update_metadata(self, cert_id: str, updates: Dict) -> None:
+        """Met à jour les métadonnées d'un certificat existant."""
+        all_metadata = self._load_metadata()
+        if cert_id not in all_metadata:
+            raise KeyError(f"Certificat {cert_id} introuvable dans les métadonnées")
+        all_metadata[cert_id].update(updates)
+        self._save_metadata(all_metadata)
 
     def save_certificate(
         self,
@@ -88,11 +111,15 @@ class SecureStorage:
         if not cert_id:
             raise ValueError("Les métadonnées doivent contenir un 'id'")
 
+        if password is None and self._key_password:
+            password = self._key_password
+            metadata["key_encrypted"] = True
+
         # Sauvegarder le certificat en PEM
         cert_pem = cert.public_bytes(serialization.Encoding.PEM)
         cert_file = self.certs_dir / f"{cert_id}.pem"
         cert_file.write_bytes(cert_pem)
-        os.chmod(cert_file, 0o644)
+        os.chmod(cert_file, 0o600)
 
         # Sauvegarder la clé privée
         from .key import KeyManager
@@ -132,11 +159,14 @@ class SecureStorage:
         if not csr_id:
             raise ValueError("Les métadonnées doivent contenir un 'id'")
 
+        if password is None and self._key_password:
+            password = self._key_password
+
         # Sauvegarder la CSR en PEM
         csr_pem = csr.public_bytes(serialization.Encoding.PEM)
         csr_file = self.csr_dir / f"{csr_id}.csr"
         csr_file.write_bytes(csr_pem)
-        os.chmod(csr_file, 0o644)
+        os.chmod(csr_file, 0o600)
 
         # Sauvegarder la clé privée
         from .key import KeyManager
@@ -152,6 +182,17 @@ class SecureStorage:
         self._save_metadata(all_metadata)
 
         return csr_id
+
+    def load_csr(self, csr_id: str) -> tuple[x509.CertificateSigningRequest, Dict]:
+        """Charge une CSR et ses métadonnées."""
+        csr_file = self.csr_dir / f"{csr_id}.csr"
+        if not csr_file.exists():
+            raise FileNotFoundError(f"CSR {csr_id} introuvable")
+
+        csr_pem = csr_file.read_bytes()
+        csr = x509.load_pem_x509_csr(csr_pem, default_backend())
+        metadata = self._load_metadata().get(csr_id, {})
+        return csr, metadata
 
     def load_certificate(self, cert_id: str) -> tuple[x509.Certificate, Dict]:
         """
@@ -191,7 +232,10 @@ class SecureStorage:
         key_pem = key_file.read_bytes()
         from .key import KeyManager
         key_manager = KeyManager()
-        return key_manager.pem_to_key(key_pem, password)
+        load_password = password
+        if load_password is None and self._key_password:
+            load_password = self._key_password
+        return key_manager.pem_to_key(key_pem, load_password)
 
     def list_certificates(self) -> List[Dict]:
         """
@@ -210,12 +254,13 @@ class SecureStorage:
             # Charger le certificat pour obtenir les dates
             try:
                 cert, _ = self.load_certificate(cert_id)
+                now = datetime.now(timezone.utc)
                 meta["not_valid_before"] = cert.not_valid_before_utc.isoformat()
                 meta["not_valid_after"] = cert.not_valid_after_utc.isoformat()
-                meta["is_expired"] = cert.not_valid_after_utc < datetime.utcnow()
+                meta["is_expired"] = cert.not_valid_after_utc < now
                 meta["days_until_expiry"] = (
-                    cert.not_valid_after_utc - datetime.utcnow()
-                ).days if not meta["is_expired"] else 0
+                    (cert.not_valid_after_utc - now).days if not meta["is_expired"] else 0
+                )
             except Exception:
                 # Si le certificat ne peut pas être chargé, continuer
                 pass
@@ -223,6 +268,48 @@ class SecureStorage:
             certificates.append(meta)
 
         return certificates
+
+    def list_csrs(self) -> List[Dict]:
+        """Liste toutes les CSR stockées."""
+        metadata = self._load_metadata()
+        csrs = []
+        for csr_id, meta in metadata.items():
+            if meta.get("type") != "csr":
+                continue
+            entry = {**meta, "id": csr_id}
+            csr_file = self.csr_dir / f"{csr_id}.csr"
+            entry["has_csr_file"] = csr_file.exists()
+            csrs.append(entry)
+        return csrs
+
+    def delete_csr(self, csr_id: str) -> None:
+        """Supprime une CSR et sa clé privée."""
+        metadata = self._load_metadata()
+        if csr_id not in metadata or metadata[csr_id].get("type") != "csr":
+            raise FileNotFoundError(f"CSR {csr_id} introuvable")
+
+        csr_file = self.csr_dir / f"{csr_id}.csr"
+        key_file = self.keys_dir / f"{csr_id}.key"
+        if csr_file.exists():
+            csr_file.unlink()
+        if key_file.exists():
+            key_file.unlink()
+
+        del metadata[csr_id]
+        self._save_metadata(metadata)
+
+    def list_archived_certificates(self) -> List[Dict]:
+        """Liste les certificats archivés."""
+        archive_dir = self.storage_path / "archive"
+        metadata_file = archive_dir / "metadata.json"
+        if not metadata_file.exists():
+            return []
+        try:
+            with open(metadata_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return list(data.values())
+        except (json.JSONDecodeError, OSError):
+            return []
 
     def delete_certificate(self, cert_id: str):
         """

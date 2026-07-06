@@ -394,44 +394,27 @@ Cette roadmap détaille le plan de développement du projet par ordre de priorit
 
 ## 📈 Progression globale
 
-**Statut actuel** : 🟡 **Phase 2 et 3 en cours**
+**Statut actuel** : 🟢 **v0.2 — Base saine + P1 sécurité en cours**
 
-- ✅ **Phase 1 (MVP)** : 100% complété
-- ✅ **Phase 2 (Gestion)** : 100% complété
-  - ✅ Cycle de vie : 100%
-  - ✅ Alertes : 100%
-  - ✅ Renouvellement : 100%
-  - ✅ Import/Export : 100%
-  - ✅ Gestion CA : 100%
-- 🟡 **Phase 3 (Interface)** : 95% complété
-  - ✅ API REST : 100%
-  - ✅ Interface Web : 100%
-  - ✅ Let's Encrypt : 100%
-  - ✅ Graphiques et visualisations : 100%
-  - ✅ Actions en masse et filtres : 100%
-  - ⏳ Authentification : 0%
-  - ⏳ Tests d'intégration : 0%
-- 🟡 **Phase 4 (Avancé)** : 25% complété
-  - ✅ Certificats wildcard : 100%
-  - ✅ Certificats client : 100%
-  - ⏳ Audit et journalisation : 0%
-  - ⏳ Sécurité renforcée : 0%
-  - ⏳ Performance et optimisation : 0%
+- ✅ **Phase 1 (MVP)** : 100 %
+- ✅ **Phase 2 (Gestion)** : 100 %
+- ✅ **Phase 3 (Interface)** : 95 %
+  - ✅ API REST, Web UI, Let's Encrypt, graphiques, bulk actions
+  - 🔧 Authentification JWT (optionnelle, implémentée)
+  - 🔧 Tests d'intégration (34 tests automatisés)
+- 🔧 **Phase 4 (v2 — Production)** : 40 %
+  - ✅ Sprint 0 stabilisation
+  - ✅ CI/CD + Docker
+  - 🔧 Sécurité (auth, rate limit, permissions)
+  - ⬜ Audit, backup, scheduler
 
-**Prochaines étapes recommandées** :
-1. ✅ Cycle de vie et alertes (TERMINÉ)
-2. ✅ Renouvellement de certificats (TERMINÉ)
-3. ✅ Import/Export (TERMINÉ)
-4. ✅ Gestion CA (TERMINÉ)
-5. ✅ Let's Encrypt (TERMINÉ)
-6. ✅ Graphiques et visualisations (TERMINÉ)
-7. ✅ Actions en masse (TERMINÉ)
-8. ✅ Filtres avancés (TERMINÉ)
-9. ✅ Certificats wildcard (TERMINÉ)
-10. ✅ Certificats client (TERMINÉ)
-11. **Tests complets** (Priorité critique)
-12. **Authentification** (Pour usage production)
-13. **Audit et journalisation** (Phase 4)
+**Prochaines étapes** :
+1. Compléter tests (lifecycle, import_export, ca_manager) → 80 % couverture
+2. Audit logs (`src/core/audit.py`)
+3. Chiffrement clés par défaut
+4. Epic 4 — Génération CA, backup/restore
+
+Voir [TODO-V2.md](TODO-V2.md) pour le détail.
 
 ---
 

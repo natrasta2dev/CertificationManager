@@ -11,6 +11,10 @@ from .renewal import CertificateRenewal
 from .import_export import CertificateImporter, CertificateExporter
 from .ca_manager import CAManager
 from .letsencrypt import LetsEncryptManager
+from .backup import BackupManager
+from .notifications import EmailNotifier
+from .scheduler import SchedulerService
+from .webhooks import WebhookManager
 
 __all__ = [
     "CertificateManager",
@@ -28,5 +32,9 @@ __all__ = [
     "CertificateExporter",
     "CAManager",
     "LetsEncryptManager",
+    "BackupManager",
+    "EmailNotifier",
+    "SchedulerService",
+    "WebhookManager",
 ]
 

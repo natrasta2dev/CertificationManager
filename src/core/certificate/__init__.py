@@ -13,6 +13,31 @@ from ..key import KeyManager
 from ..validation.domain import DomainValidator
 
 
+def _dn_metadata(
+    country: Optional[str] = None,
+    state: Optional[str] = None,
+    locality: Optional[str] = None,
+    organization: Optional[str] = None,
+    organizational_unit: Optional[str] = None,
+    email: Optional[str] = None,
+) -> Dict:
+    """Construit les champs DN pour les métadonnées."""
+    dn: Dict = {}
+    if country:
+        dn["country"] = country
+    if state:
+        dn["state"] = state
+    if locality:
+        dn["locality"] = locality
+    if organization:
+        dn["organization"] = organization
+    if organizational_unit:
+        dn["organizational_unit"] = organizational_unit
+    if email:
+        dn["email"] = email
+    return dn
+
+
 class CertificateManager:
     """Gestionnaire de certificats X.509."""
 
@@ -127,6 +152,8 @@ class CertificateManager:
             if not is_valid:
                 raise ValueError(f"Domaines invalides: {', '.join(invalid_domains)}")
             san_list.extend([x509.DNSName(dns) for dns in san_dns])
+            if common_name not in san_dns:
+                san_list.insert(0, x509.DNSName(common_name))
         if san_ip:
             san_list.extend([x509.IPAddress(ip) for ip in san_ip])
         if not san_list:
@@ -164,7 +191,10 @@ class CertificateManager:
             "is_wildcard": DomainValidator.is_wildcard(common_name) or (
                 san_dns and any(DomainValidator.is_wildcard(dns) for dns in san_dns)
             ),
-            "certificate_type": "server",  # Par défaut, certificat serveur
+            "certificate_type": "server",
+            **_dn_metadata(
+                country, state, locality, organization, organizational_unit, email
+            ),
         }
 
         return cert, private_key, metadata
@@ -283,6 +313,9 @@ class CertificateManager:
             "key_type": key_type,
             "key_size": key_size if key_type.upper() == "RSA" else None,
             "created": datetime.utcnow().isoformat(),
+            **_dn_metadata(
+                country, state, locality, organization, organizational_unit, email
+            ),
         }
 
         return csr, private_key, metadata

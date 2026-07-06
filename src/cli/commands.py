@@ -1,8 +1,10 @@
 """Commandes CLI pour CertificationManager."""
 
+import ipaddress
+import json
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 import click
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
@@ -22,11 +24,31 @@ from ..core import (
     CAManager,
     LetsEncryptManager,
 )
+from ..core.backup import BackupManager
+from ..core.app_config import (
+    export_app_config,
+    get_app_config_summary,
+    import_app_config,
+    load_alert_thresholds,
+    save_alert_thresholds,
+)
+from ..core.alerts import AlertLevel
+from ..core.version import get_version
 from .web_command import web
 
 
+def _parse_san_ip(san_ip: tuple) -> Optional[List[str]]:
+    if not san_ip:
+        return None
+    parsed = []
+    for addr in san_ip:
+        ipaddress.ip_address(addr)
+        parsed.append(addr)
+    return parsed
+
+
 @click.group()
-@click.version_option(version="0.1.0")
+@click.version_option(version=get_version())
 def cli():
     """CertificationManager - Gestionnaire de certificats cryptographiques."""
     pass
@@ -86,6 +108,11 @@ def cli():
     help="Subject Alternative Name DNS (peut être utilisé plusieurs fois)"
 )
 @click.option(
+    "--san-ip",
+    multiple=True,
+    help="Subject Alternative Name IP (ex. 192.168.1.1)"
+)
+@click.option(
     "--output", "-o",
     help="Fichier de sortie pour le certificat (optionnel, sinon sauvegardé dans le stockage)"
 )
@@ -101,6 +128,7 @@ def generate(
     organizational_unit: Optional[str],
     email: Optional[str],
     san_dns: tuple,
+    san_ip: tuple,
     output: Optional[str],
 ):
     """Génère un certificat auto-signé."""
@@ -109,6 +137,7 @@ def generate(
         
         # Convertir san_dns tuple en liste
         san_dns_list = list(san_dns) if san_dns else None
+        san_ip_list = _parse_san_ip(san_ip)
 
         cert, private_key, metadata = cert_manager.generate_self_signed_cert(
             common_name=common_name,
@@ -122,6 +151,7 @@ def generate(
             organizational_unit=organizational_unit,
             email=email,
             san_dns=san_dns_list,
+            san_ip=san_ip_list,
         )
 
         if output:
@@ -143,7 +173,13 @@ def generate(
         sys.exit(1)
 
 
-@cli.command()
+@cli.group()
+def csr():
+    """Gestion des Certificate Signing Requests (CSR)."""
+    pass
+
+
+@csr.command("generate")
 @click.option(
     "--common-name", "-n",
     required=True,
@@ -191,10 +227,15 @@ def generate(
     help="Subject Alternative Name DNS"
 )
 @click.option(
+    "--san-ip",
+    multiple=True,
+    help="Subject Alternative Name IP"
+)
+@click.option(
     "--output", "-o",
     help="Fichier de sortie pour la CSR"
 )
-def csr(
+def csr_generate(
     common_name: str,
     key_type: str,
     key_size: str,
@@ -205,6 +246,7 @@ def csr(
     organizational_unit: Optional[str],
     email: Optional[str],
     san_dns: tuple,
+    san_ip: tuple,
     output: Optional[str],
 ):
     """Génère une Certificate Signing Request (CSR)."""
@@ -212,6 +254,7 @@ def csr(
         cert_manager = CertificateManager()
         
         san_dns_list = list(san_dns) if san_dns else None
+        san_ip_list = _parse_san_ip(san_ip)
 
         csr, private_key, metadata = cert_manager.generate_csr(
             common_name=common_name,
@@ -224,6 +267,7 @@ def csr(
             organizational_unit=organizational_unit,
             email=email,
             san_dns=san_dns_list,
+            san_ip=san_ip_list,
         )
 
         if output:
@@ -237,6 +281,54 @@ def csr(
             click.echo(f"   ID: {csr_id}")
             click.echo(f"   CN: {common_name}")
 
+    except Exception as e:
+        click.echo(f"❌ Erreur: {e}", err=True)
+        sys.exit(1)
+
+
+@csr.command("list")
+@click.option(
+    "--format",
+    type=click.Choice(["table", "json"], case_sensitive=False),
+    default="table",
+    help="Format de sortie",
+)
+def csr_list(format: str):
+    """Liste les CSR en attente de signature."""
+    try:
+        storage = SecureStorage()
+        csrs = storage.list_csrs()
+        if format == "json":
+            import json
+            click.echo(json.dumps(csrs, indent=2))
+            return
+        if not csrs:
+            click.echo("Aucune CSR en attente.")
+            return
+        click.echo(f"\n{'ID':<36} {'CN':<30} {'Créée le':<20}")
+        click.echo("-" * 90)
+        for item in csrs:
+            click.echo(
+                f"{item.get('id', 'N/A')[:36]:<36} "
+                f"{item.get('common_name', 'N/A')[:30]:<30} "
+                f"{str(item.get('created', 'N/A'))[:20]:<20}"
+            )
+    except Exception as e:
+        click.echo(f"❌ Erreur: {e}", err=True)
+        sys.exit(1)
+
+
+@csr.command("delete")
+@click.option("--id", required=True, help="ID de la CSR à supprimer")
+@click.confirmation_option(prompt="Supprimer cette CSR ?")
+def csr_delete(id: str):
+    """Supprime une CSR stockée."""
+    try:
+        SecureStorage().delete_csr(id)
+        click.echo(f"✅ CSR {id} supprimée")
+    except FileNotFoundError as e:
+        click.echo(f"❌ {e}", err=True)
+        sys.exit(1)
     except Exception as e:
         click.echo(f"❌ Erreur: {e}", err=True)
         sys.exit(1)
@@ -595,52 +687,84 @@ def alerts(threshold: tuple, include_expired: bool, format: str):
 
 
 @cli.command()
-@click.option(
-    "--id",
-    required=True,
-    help="ID du certificat à renouveler"
-)
+@click.option("--id", help="ID du certificat à renouveler")
+@click.option("--all", "renew_all", is_flag=True, help="Renouveler tous les certificats expirant bientôt")
+@click.option("--days", default=30, type=int, help="Seuil en jours pour --all (défaut: 30)")
 @click.option(
     "--validity-days", "-d",
     type=int,
-    help="Nombre de jours de validité pour le nouveau certificat (défaut: même durée que l'original)"
+    help="Nombre de jours de validité pour le nouveau certificat"
 )
 @click.option(
     "--no-archive",
     is_flag=True,
     help="Ne pas archiver l'ancien certificat"
 )
-def renew(id: str, validity_days: Optional[int], no_archive: bool):
-    """Renouvelle un certificat avec les mêmes paramètres."""
+@click.option("--dry-run", is_flag=True, help="Simuler sans renouveler (avec --all)")
+def renew(
+    id: Optional[str],
+    renew_all: bool,
+    days: int,
+    validity_days: Optional[int],
+    no_archive: bool,
+    dry_run: bool,
+):
+    """Renouvelle un ou plusieurs certificats."""
     try:
         renewal = CertificateRenewal()
-        
-        # Vérifier si le certificat peut être renouvelé
+
+        if renew_all:
+            results = renewal.renew_all_expiring(
+                days_threshold=days,
+                dry_run=dry_run,
+                archive_old=not no_archive,
+                validity_days=validity_days,
+            )
+            if not results:
+                click.echo(f"✅ Aucun certificat à renouveler dans les {days} prochains jours.")
+                return
+            ok = sum(1 for _, new_id, err in results if new_id and not err)
+            failed = sum(1 for _, _, err in results if err)
+            click.echo(f"{'Simulation' if dry_run else 'Renouvellement'} : {len(results)} certificat(s)")
+            for old_id, new_id, err in results:
+                if err:
+                    click.echo(f"  ❌ {old_id[:8]}... : {err}")
+                elif dry_run:
+                    click.echo(f"  🔍 {old_id[:8]}... serait renouvelé")
+                else:
+                    click.echo(f"  ✅ {old_id[:8]}... → {new_id[:8]}...")
+            click.echo(f"Résumé : {ok} OK, {failed} échec(s)")
+            if failed:
+                sys.exit(1)
+            return
+
+        if not id:
+            click.echo("❌ Spécifiez --id ou --all", err=True)
+            sys.exit(1)
+
         can_renew, error_msg = renewal.can_renew(id)
         if not can_renew:
             click.echo(f"❌ {error_msg}", err=True)
             sys.exit(1)
-        
-        # Charger l'ancien certificat pour afficher les infos
+
         storage = SecureStorage()
-        old_cert, old_metadata = storage.load_certificate(id)
+        _, old_metadata = storage.load_certificate(id)
         common_name = old_metadata.get('common_name', 'N/A')
-        
+
         click.echo(f"🔄 Renouvellement du certificat: {common_name}")
         click.echo(f"   ID: {id}")
-        
-        # Renouveler
+
         new_cert_id, new_metadata = renewal.renew_certificate(
             id,
             validity_days=validity_days,
-            archive_old=not no_archive
+            archive_old=not no_archive,
         )
-        
-        click.echo(f"✅ Certificat renouvelé avec succès!")
+
+        click.echo("✅ Certificat renouvelé avec succès!")
         click.echo(f"   Nouveau ID: {new_cert_id}")
         click.echo(f"   Valide jusqu'au: {new_metadata.get('not_valid_after', 'N/A')}")
         if not no_archive:
-            click.echo(f"   Ancien certificat archivé")
+            click.echo("   Ancien certificat archivé")
 
     except Exception as e:
         click.echo(f"❌ Erreur: {e}", err=True)
@@ -849,6 +973,118 @@ def ca_list(format: str):
             for row in rows:
                 click.echo(" ".join(f"{str(item):<{w}}" for item, w in zip(row, col_widths)))
 
+    except Exception as e:
+        click.echo(f"❌ Erreur: {e}", err=True)
+        sys.exit(1)
+
+
+@ca.command("generate")
+@click.option("--common-name", "-n", required=True, help="CN de la CA")
+@click.option("--name", help="Nom affiché de la CA")
+@click.option(
+    "--intermediate",
+    is_flag=True,
+    help="Générer une CA intermédiaire (nécessite --parent-id)",
+)
+@click.option("--parent-id", help="ID de la CA parent")
+@click.option("--validity-days", "-d", default=3650, type=int, help="Validité en jours")
+@click.option("--key-type", type=click.Choice(["RSA", "ECDSA"]), default="RSA")
+@click.option("--key-size", "-s", type=click.Choice(["2048", "3072", "4096"]), default="2048")
+@click.option("--country", "-C", help="Code pays")
+@click.option("--organization", "-O", help="Organisation")
+def ca_generate(
+    common_name: str,
+    name: Optional[str],
+    intermediate: bool,
+    parent_id: Optional[str],
+    validity_days: int,
+    key_type: str,
+    key_size: str,
+    country: Optional[str],
+    organization: Optional[str],
+):
+    """Génère une CA racine ou intermédiaire avec clé privée."""
+    try:
+        ca_manager = CAManager()
+        ca_id = ca_manager.generate_ca(
+            common_name=common_name,
+            name=name,
+            is_root=not intermediate,
+            parent_ca_id=parent_id,
+            key_type=key_type,
+            key_size=int(key_size),
+            validity_days=validity_days,
+            country=country,
+            organization=organization,
+        )
+        _, metadata = ca_manager.get_ca_certificate(ca_id)
+        click.echo("✅ CA générée avec succès!")
+        click.echo(f"   ID: {ca_id}")
+        click.echo(f"   CN: {metadata.get('common_name')}")
+        click.echo(f"   Type: {'Racine' if metadata.get('is_root') else 'Intermédiaire'}")
+        click.echo(f"   Clé privée: ✅ stockée localement")
+    except ValueError as e:
+        click.echo(f"❌ {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"❌ Erreur: {e}", err=True)
+        sys.exit(1)
+
+
+@ca.command("sign")
+@click.option("--ca-id", required=True, help="ID de la CA signataire")
+@click.option("--csr-id", help="ID d'une CSR stockée")
+@click.option("--csr-file", "-f", help="Fichier CSR PEM")
+@click.option("--common-name", "-n", help="CN pour génération directe (sans CSR)")
+@click.option("--validity-days", "-d", default=365, type=int)
+@click.option("--san-dns", multiple=True, help="SAN DNS (répétable)")
+def ca_sign(
+    ca_id: str,
+    csr_id: Optional[str],
+    csr_file: Optional[str],
+    common_name: Optional[str],
+    validity_days: int,
+    san_dns: tuple,
+):
+    """Signe une CSR ou génère un certificat serveur via une CA locale."""
+    try:
+        ca_manager = CAManager()
+        storage = SecureStorage()
+
+        if csr_id:
+            cert_id = ca_manager.sign_csr_from_storage(ca_id, csr_id, validity_days)
+            _, meta = storage.load_certificate(cert_id)
+            click.echo(f"✅ Certificat signé depuis CSR: {cert_id}")
+            click.echo(f"   CN: {meta.get('common_name')}")
+        elif csr_file:
+            from cryptography import x509
+            csr_data = Path(csr_file).read_bytes()
+            csr = x509.load_pem_x509_csr(csr_data, default_backend())
+            cert, metadata = ca_manager.sign_csr(ca_id, csr, validity_days)
+            key_path = Path(csr_file).with_suffix(".key")
+            if not key_path.exists():
+                click.echo("❌ Fichier clé .key introuvable à côté de la CSR", err=True)
+                sys.exit(1)
+            from ..core.key import KeyManager
+            private_key = KeyManager().pem_to_key(key_path.read_bytes())
+            cert_id = storage.save_certificate(cert, private_key, metadata)
+            click.echo(f"✅ Certificat signé: {cert_id}")
+        elif common_name:
+            cert_id = ca_manager.sign_server_certificate(
+                ca_id=ca_id,
+                common_name=common_name,
+                validity_days=validity_days,
+                san_dns=list(san_dns) if san_dns else None,
+            )
+            _, meta = storage.load_certificate(cert_id)
+            click.echo(f"✅ Certificat serveur signé: {cert_id}")
+            click.echo(f"   CN: {meta.get('common_name')}")
+        else:
+            click.echo("❌ Spécifiez --csr-id, --csr-file ou --common-name", err=True)
+            sys.exit(1)
+    except (FileNotFoundError, ValueError) as e:
+        click.echo(f"❌ {e}", err=True)
+        sys.exit(1)
     except Exception as e:
         click.echo(f"❌ Erreur: {e}", err=True)
         sys.exit(1)
@@ -1338,6 +1574,263 @@ cli.add_command(web)
 cli.add_command(ca)
 cli.add_command(letsencrypt)
 cli.add_command(client)
+
+
+@cli.group()
+def user():
+    """Gestion des utilisateurs."""
+    pass
+
+
+@user.command("create")
+@click.option("--username", "-u", required=True, help="Nom d'utilisateur")
+@click.option(
+    "--role",
+    type=click.Choice(["admin", "operator", "viewer"], case_sensitive=False),
+    default="viewer",
+    help="Rôle de l'utilisateur",
+)
+@click.option("--password", "-p", help="Mot de passe (sinon demandé)")
+def user_create(username: str, role: str, password: Optional[str]):
+    """Crée un nouvel utilisateur."""
+    from ..core.users import UserManager, UserRole
+
+    if not password:
+        password = click.prompt("Mot de passe", hide_input=True, confirmation_prompt=True)
+
+    try:
+        manager = UserManager()
+        user_obj = manager.create_user(username, password, UserRole(role.lower()))
+        click.echo(f"✅ Utilisateur créé: {user_obj.username} (rôle: {user_obj.role.value})")
+        click.echo(f"   ID: {user_obj.id}")
+    except ValueError as e:
+        click.echo(f"❌ {e}", err=True)
+        sys.exit(1)
+
+
+@user.command("list")
+def user_list():
+    """Liste les utilisateurs."""
+    from ..core.users import UserManager
+
+    manager = UserManager()
+    users = manager.list_users()
+    if not users:
+        click.echo("Aucun utilisateur.")
+        return
+    for u in users:
+        click.echo(f"  {u['username']:20} {u['role']:10} {u['id']}")
+
+
+@user.command("delete")
+@click.option("--username", "-u", help="Nom d'utilisateur à supprimer")
+@click.option("--id", "user_id", help="ID de l'utilisateur à supprimer")
+@click.confirmation_option(prompt="Confirmer la suppression ?")
+def user_delete(username: Optional[str], user_id: Optional[str]):
+    """Supprime un utilisateur."""
+    from ..core.users import UserManager
+
+    manager = UserManager()
+    if not user_id and username:
+        user_obj = manager.get_by_username(username)
+        if not user_obj:
+            click.echo(f"❌ Utilisateur '{username}' introuvable", err=True)
+            sys.exit(1)
+        user_id = user_obj.id
+    if not user_id:
+        click.echo("❌ Spécifiez --username ou --id", err=True)
+        sys.exit(1)
+
+    try:
+        manager.delete_user(user_id)
+        click.echo(f"✅ Utilisateur supprimé: {user_id}")
+    except KeyError:
+        click.echo(f"❌ Utilisateur introuvable: {user_id}", err=True)
+        sys.exit(1)
+
+
+@cli.group()
+def config():
+    """Configuration applicative (seuils alertes, export/import)."""
+    pass
+
+
+@config.command("show")
+def config_show():
+    """Affiche la configuration actuelle."""
+    summary = get_app_config_summary()
+    click.echo(json.dumps(summary, indent=2, ensure_ascii=False))
+
+
+@config.command("export")
+@click.option("--output", "-o", required=True, help="Fichier JSON de sortie")
+def config_export(output: str):
+    """Exporte SMTP, webhooks, scheduler et seuils d'alerte."""
+    from ..config import get_settings
+    result = export_app_config(get_settings().storage_path, output)
+    click.echo(f"✅ Configuration exportée vers {result['path']}")
+    click.echo(f"   Fichiers: {', '.join(result['exported'])}")
+
+
+@config.command("import")
+@click.argument("file", type=click.Path(exists=True))
+def config_import_cmd(file: str):
+    """Importe une configuration exportée."""
+    from ..config import get_settings
+    result = import_app_config(get_settings().storage_path, file)
+    click.echo(f"✅ Importé: {', '.join(result['imported'])}")
+
+
+@config.command("set-threshold")
+@click.argument("days", type=int)
+@click.argument("level", type=click.Choice(["info", "warning", "critical", "error"]))
+def config_set_threshold(days: int, level: str):
+    """Définit un seuil d'alerte (jours avant expiration → niveau)."""
+    from ..config import get_settings
+    storage_path = get_settings().storage_path
+    thresholds = load_alert_thresholds(storage_path) or {
+        7: AlertLevel.CRITICAL,
+        30: AlertLevel.WARNING,
+        60: AlertLevel.INFO,
+    }
+    thresholds[days] = AlertLevel(level)
+    save_alert_thresholds(storage_path, thresholds)
+    click.echo(f"✅ Seuil {days} jours → {level}")
+
+
+@cli.command("backup")
+@click.option("--output", "-o", required=True, help="Fichier de sortie (.tar.gz ou .enc)")
+@click.option("--password", "-p", help="Mot de passe pour chiffrer l'archive")
+def backup_cmd(output: str, password: Optional[str]):
+    """Crée une sauvegarde du stockage."""
+    try:
+        manager = BackupManager()
+        meta = manager.create_backup(output, password=password)
+        click.echo("✅ Backup créé avec succès!")
+        click.echo(f"   Fichier: {meta['output_path']}")
+        click.echo(f"   Taille: {meta['size_bytes']} octets")
+        if meta.get("encrypted"):
+            click.echo("   Chiffrement: ✅ activé")
+    except Exception as e:
+        click.echo(f"❌ Erreur: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.command("restore")
+@click.option("--input", "-i", "input_path", required=True, help="Archive de backup")
+@click.option("--password", "-p", help="Mot de passe si archive chiffrée")
+@click.option("--target", help="Répertoire cible (défaut: stockage actuel)")
+@click.option("--yes", is_flag=True, help="Écraser le stockage existant")
+def restore_cmd(input_path: str, password: Optional[str], target: Optional[str], yes: bool):
+    """Restaure une sauvegarde."""
+    try:
+        manager = BackupManager()
+        result = manager.restore_backup(
+            input_path,
+            password=password,
+            target_path=target,
+            overwrite=yes,
+        )
+        click.echo("✅ Restauration terminée!")
+        click.echo(f"   Cible: {result['target_path']}")
+        click.echo(f"   Backup du: {result.get('backup_created_at', 'N/A')}")
+    except ValueError as e:
+        click.echo(f"❌ {e}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"❌ Erreur: {e}", err=True)
+        sys.exit(1)
+
+
+@cli.group()
+def scheduler():
+    """Planificateur de tâches (alertes, renouvellement, conformité)."""
+    pass
+
+
+@scheduler.command("run")
+@click.argument("job", type=click.Choice(["check-alerts", "auto-renew", "compliance-scan", "weekly-report", "all"]))
+@click.option("--days", type=int, help="Seuil jours pour auto-renew")
+def scheduler_run(job: str, days: Optional[int]):
+    """Exécute une tâche une fois (compatible cron)."""
+    from ..core.scheduler import SchedulerService
+
+    try:
+        service = SchedulerService()
+        result = service.run_job(job, days=days)
+        import json
+        click.echo(json.dumps(result, indent=2, ensure_ascii=False))
+    except Exception as e:
+        click.echo(f"❌ Erreur: {e}", err=True)
+        sys.exit(1)
+
+
+@scheduler.command("start")
+@click.option("--interval", "-i", type=int, default=None, help="Intervalle en minutes")
+def scheduler_start(interval: Optional[int]):
+    """Démarre le scheduler en premier plan (Ctrl+C pour arrêter)."""
+    from ..core.scheduler import SchedulerService
+
+    click.echo("🕐 Scheduler démarré (Ctrl+C pour arrêter)")
+    SchedulerService().start_foreground(interval_minutes=interval)
+
+
+@scheduler.command("stop")
+def scheduler_stop():
+    """Arrête le scheduler en arrière-plan."""
+    from ..core.scheduler import SchedulerService
+
+    if SchedulerService().stop():
+        click.echo("✅ Signal d'arrêt envoyé au scheduler")
+    else:
+        click.echo("ℹ️  Aucun scheduler en cours d'exécution")
+
+
+@scheduler.command("status")
+def scheduler_status():
+    """Affiche l'état du scheduler."""
+    from ..core.scheduler import SchedulerService
+    import json
+
+    status = SchedulerService().get_status()
+    click.echo(json.dumps(status, indent=2, ensure_ascii=False))
+
+
+@scheduler.command("config")
+@click.option("--enable-auto-renew", is_flag=True, help="Activer le renouvellement auto")
+@click.option("--disable-auto-renew", is_flag=True, help="Désactiver le renouvellement auto")
+@click.option("--interval", type=int, help="Intervalle en minutes")
+@click.option("--renew-days", type=int, help="Seuil jours pour auto-renew")
+def scheduler_config(
+    enable_auto_renew: bool,
+    disable_auto_renew: bool,
+    interval: Optional[int],
+    renew_days: Optional[int],
+):
+    """Configure le scheduler."""
+    from ..core.scheduler import SchedulerService
+    import json
+
+    service = SchedulerService()
+    updates = {}
+    if enable_auto_renew:
+        updates["auto_renew_enabled"] = True
+    if disable_auto_renew:
+        updates["auto_renew_enabled"] = False
+    if interval is not None:
+        updates["interval_minutes"] = interval
+    if renew_days is not None:
+        updates["auto_renew_days"] = renew_days
+
+    if updates:
+        cfg = service.update_config(updates)
+        click.echo("✅ Configuration mise à jour")
+    else:
+        cfg = service.get_config()
+    click.echo(json.dumps(cfg, indent=2, ensure_ascii=False))
+
+
+cli.add_command(user)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,71 @@
 // API Base URL
 const API_BASE = '/api';
 
+// Auth helpers
+function getAuthToken() {
+    return localStorage.getItem('auth_token');
+}
+
+function getAuthHeaders(extra = {}) {
+    const headers = { ...extra };
+    const token = getAuthToken();
+    if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    const csrf = localStorage.getItem('csrf_token');
+    if (csrf) {
+        headers['X-CSRF-Token'] = csrf;
+    }
+    return headers;
+}
+
+async function apiFetch(url, options = {}) {
+    const response = await fetch(url, {
+        ...options,
+        headers: getAuthHeaders(options.headers || {}),
+    });
+
+    if (response.status === 401) {
+        const statusRes = await fetch(`${API_BASE}/auth/status`);
+        const statusData = await statusRes.json();
+        if (statusData?.data?.auth_enabled) {
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('auth_user');
+            window.location.href = '/api/login';
+            return response;
+        }
+    }
+
+    return response;
+}
+
+async function checkAuthOnLoad() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/status`);
+        const result = await response.json();
+        if (result?.data?.auth_enabled && !getAuthToken()) {
+            window.location.href = '/api/login';
+            return;
+        }
+        if (getAuthToken()) {
+            const meRes = await apiFetch(`${API_BASE}/auth/me`);
+            const meData = await meRes.json();
+            if (meData?.data?.role) {
+                currentUserRole = meData.data.role;
+            }
+            if (meData?.data?.role === 'admin') {
+                document.getElementById('nav-audit')?.style.setProperty('display', 'inline-flex');
+                document.getElementById('nav-admin')?.style.setProperty('display', 'inline-flex');
+            } else if (result?.data?.auth_enabled) {
+                document.getElementById('nav-audit')?.style.setProperty('display', 'inline-flex');
+            }
+        }
+        updateSettingsFormAccess();
+    } catch (e) {
+        console.warn('Auth check failed', e);
+    }
+}
+
 // State
 let certificates = [];
 let filteredCertificates = [];
@@ -8,6 +73,11 @@ let currentTab = 'certificates';
 let statusChart = null;
 let timelineChart = null;
 let selectedCertificates = new Set();
+let currentUserRole = 'admin';
+let certPage = 1;
+let certLimit = 20;
+let certPagination = null;
+let searchDebounceTimer = null;
 let currentFilters = {
     status: '',
     keyType: '',
@@ -17,11 +87,57 @@ let currentFilters = {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
+    initKeyboardShortcuts();
+    checkAuthOnLoad();
     initializeTabs();
     initializeForms();
     loadCertificates();
     loadAlerts();
 });
+
+function parseSanField(value) {
+    return value ? value.split(',').map(s => s.trim()).filter(Boolean) : null;
+}
+
+function initTheme() {
+    const saved = localStorage.getItem('theme') || 'light';
+    document.documentElement.setAttribute('data-theme', saved);
+    updateThemeIcon(saved);
+}
+
+function toggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme') || 'light';
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    updateThemeIcon(next);
+}
+
+function updateThemeIcon(theme) {
+    const btn = document.getElementById('theme-toggle');
+    if (!btn) return;
+    btn.innerHTML = theme === 'dark'
+        ? '<i class="fas fa-sun"></i>'
+        : '<i class="fas fa-moon"></i>';
+}
+
+function initKeyboardShortcuts() {
+    document.addEventListener('keydown', (e) => {
+        if (e.target.matches('input, textarea, select') && e.key !== 'Escape') return;
+        if (e.key === '/') {
+            e.preventDefault();
+            document.getElementById('search-input')?.focus();
+        } else if (e.key === 'n' && !e.ctrlKey && !e.metaKey) {
+            switchTab('generate');
+        } else if (e.key === 'r' && !e.ctrlKey && !e.metaKey) {
+            if (currentTab === 'certificates') loadCertificates();
+            else if (currentTab === 'alerts') loadAlerts();
+        } else if (e.key === 'Escape') {
+            closeModal();
+        }
+    });
+}
 
 // Tab Management
 function initializeTabs() {
@@ -60,6 +176,16 @@ function switchTab(tab) {
         checkCertbotAndLoadLE();
     } else if (tab === 'client') {
         loadClientCertificates();
+    } else if (tab === 'audit') {
+        loadAuditLogs();
+    } else if (tab === 'admin') {
+        loadUsers();
+    } else if (tab === 'archives') {
+        loadArchives();
+    } else if (tab === 'settings') {
+        loadSettings();
+    } else if (tab === 'csr') {
+        loadCSRList();
     }
 }
 
@@ -72,14 +198,26 @@ async function loadCertificates() {
     list.innerHTML = '';
 
     try {
-        const response = await fetch(`${API_BASE}/certificates`);
+        const params = new URLSearchParams({
+            page: String(certPage),
+            limit: String(certLimit),
+            sort: 'common_name',
+            order: 'asc',
+        });
+        const status = document.getElementById('filter-status')?.value;
+        if (status) params.set('status', status);
+        const search = document.getElementById('search-input')?.value?.trim();
+        if (search) params.set('search', search);
+
+        const response = await apiFetch(`${API_BASE}/certificates?${params}`);
         const data = await response.json();
 
         if (data.success) {
             certificates = data.data;
+            certPagination = data.pagination || null;
             displayCertificates(certificates);
-            updateDashboard(certificates);
-            // Réinitialiser la sélection après rechargement
+            renderCertPagination();
+            loadDashboardFromStats();
             selectedCertificates.clear();
             updateBulkActionsBar();
         } else {
@@ -91,6 +229,72 @@ async function loadCertificates() {
     } finally {
         loading.style.display = 'none';
     }
+}
+
+function renderCertPagination() {
+    const bar = document.getElementById('certificates-pagination');
+    if (!bar || !certPagination) {
+        if (bar) bar.style.display = 'none';
+        return;
+    }
+    bar.style.display = 'flex';
+    const info = document.getElementById('cert-page-info');
+    if (info) {
+        info.textContent = `Page ${certPagination.page} / ${certPagination.pages} (${certPagination.total} total)`;
+    }
+    const prev = document.getElementById('cert-page-prev');
+    const next = document.getElementById('cert-page-next');
+    if (prev) prev.disabled = certPagination.page <= 1;
+    if (next) next.disabled = certPagination.page >= certPagination.pages;
+    const limitSelect = document.getElementById('cert-page-limit');
+    if (limitSelect) limitSelect.value = String(certLimit);
+}
+
+function changeCertPage(delta) {
+    if (!certPagination) return;
+    const newPage = certPage + delta;
+    if (newPage < 1 || newPage > certPagination.pages) return;
+    certPage = newPage;
+    loadCertificates();
+}
+
+function changeCertLimit() {
+    const limitSelect = document.getElementById('cert-page-limit');
+    certLimit = parseInt(limitSelect?.value || '20', 10);
+    certPage = 1;
+    loadCertificates();
+}
+
+async function loadDashboardFromStats() {
+    try {
+        const response = await apiFetch(`${API_BASE}/statistics`);
+        const result = await response.json();
+        if (result.success && result.data) {
+            updateDashboardFromStats(result.data);
+        }
+    } catch (e) {
+        console.warn('Stats dashboard', e);
+    }
+}
+
+function updateDashboardFromStats(stats) {
+    const dashboardSection = document.getElementById('dashboard-section');
+    if (!dashboardSection) return;
+    if (!stats || stats.total === 0) {
+        dashboardSection.style.display = 'none';
+        return;
+    }
+    dashboardSection.style.display = 'block';
+    document.getElementById('stat-total').textContent = stats.total || 0;
+    document.getElementById('stat-valid').textContent = stats.valid || 0;
+    document.getElementById('stat-expiring').textContent = (stats.expiring_soon || 0) + (stats.critical || 0);
+    document.getElementById('stat-expired').textContent = stats.expired || 0;
+    updateStatusChart({
+        valid: stats.valid || 0,
+        expiring_soon: stats.expiring_soon || 0,
+        critical: stats.critical || 0,
+        expired: stats.expired || 0,
+    });
 }
 
 function displayCertificates(certs) {
@@ -112,11 +316,6 @@ function displayCertificates(certs) {
     }
 
     list.innerHTML = filteredCertificates.map(cert => createCertificateCard(cert)).join('');
-    
-    // Mettre à jour le dashboard si on est sur l'onglet certificats
-    if (currentTab === 'certificates') {
-        updateDashboard(certs);
-    }
     
     // Add event listeners
     document.querySelectorAll('.certificate-card').forEach(card => {
@@ -245,17 +444,12 @@ function createCertificateCard(cert) {
 }
 
 // Search
-document.getElementById('search-input')?.addEventListener('input', (e) => {
-    const query = e.target.value.toLowerCase();
-    // La recherche est combinée avec les filtres dans displayCertificates
-    // On met à jour certificates pour que les filtres fonctionnent
-    const filtered = certificates.filter(cert => 
-        cert.common_name?.toLowerCase().includes(query) ||
-        cert.id?.toLowerCase().includes(query) ||
-        cert.organization?.toLowerCase().includes(query)
-    );
-    // On applique les filtres sur les résultats de recherche
-    displayCertificates(filtered);
+document.getElementById('search-input')?.addEventListener('input', () => {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+        certPage = 1;
+        loadCertificates();
+    }, 350);
 });
 
 // Forms
@@ -320,13 +514,9 @@ async function handleGenerateSubmit(e) {
         organization: formData.get('organization') || null,
         organizational_unit: formData.get('organizational_unit') || null,
         email: formData.get('email') || null,
-        san_dns: formData.get('san_dns') 
-            ? formData.get('san_dns').split(',').map(s => s.trim()).filter(s => s)
-            : null,
+        san_dns: parseSanField(formData.get('san_dns')),
+        san_ip: parseSanField(formData.get('san_ip')),
     };
-
-    try {
-        const response = await fetch(`${API_BASE}/certificates`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -365,13 +555,12 @@ async function handleCSRSubmit(e) {
         organization: formData.get('organization') || null,
         organizational_unit: formData.get('organizational_unit') || null,
         email: formData.get('email') || null,
-        san_dns: formData.get('san_dns') 
-            ? formData.get('san_dns').split(',').map(s => s.trim()).filter(s => s)
-            : null,
+        san_dns: parseSanField(formData.get('san_dns')),
+        san_ip: parseSanField(formData.get('san_ip')),
     };
 
     try {
-        const response = await fetch(`${API_BASE}/csr`, {
+        const response = await apiFetch(`${API_BASE}/csr`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -384,6 +573,7 @@ async function handleCSRSubmit(e) {
         if (result.success) {
             showToast('CSR générée avec succès !', 'success');
             e.target.reset();
+            loadCSRList();
         } else {
             showToast(result.detail || 'Erreur lors de la génération', 'error');
         }
@@ -403,7 +593,7 @@ async function showCertificateDetails(certId) {
     modalBody.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Chargement...</div>';
 
     try {
-        const response = await fetch(`${API_BASE}/certificates/${certId}`);
+        const response = await apiFetch(`${API_BASE}/certificates/${certId}`);
         const result = await response.json();
 
         if (result.success) {
@@ -479,7 +669,10 @@ function createCertificateDetailsHTML(cert) {
             </div>
             ` : ''}
         </div>
-        <div class="modal-actions" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); display: flex; gap: 1rem;">
+        <div class="modal-actions" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color); display: flex; gap: 1rem; flex-wrap: wrap;">
+            <button class="btn btn-secondary" onclick="verifyCertificateChain('${cert.id}')">
+                <i class="fas fa-link"></i> Vérifier chaîne CA
+            </button>
             <button class="btn btn-primary" onclick="renewCertificate('${cert.id}'); closeModal();">
                 <i class="fas fa-sync-alt"></i> Renouveler
             </button>
@@ -497,7 +690,7 @@ function closeModal() {
 // Verify Certificate
 async function verifyCertificate(certId) {
     try {
-        const response = await fetch(`${API_BASE}/certificates/${certId}/verify`);
+        const response = await apiFetch(`${API_BASE}/certificates/${certId}/verify`);
         const result = await response.json();
 
         if (result.success) {
@@ -518,7 +711,7 @@ async function verifyCertificate(certId) {
 // Delete Certificate
 async function deleteCertificate(certId) {
     try {
-        const response = await fetch(`${API_BASE}/certificates/${certId}`, {
+        const response = await apiFetch(`${API_BASE}/certificates/${certId}`, {
             method: 'DELETE',
         });
 
@@ -586,7 +779,7 @@ async function loadAlerts() {
 
     try {
         // Load statistics
-        const statsResponse = await fetch(`${API_BASE}/statistics`);
+        const statsResponse = await apiFetch(`${API_BASE}/statistics`);
         const statsData = await statsResponse.json();
         
         if (statsData.success && statsContainer) {
@@ -616,7 +809,7 @@ async function loadAlerts() {
         }
 
         // Load alerts
-        const alertsResponse = await fetch(`${API_BASE}/alerts?include_expired=true`);
+        const alertsResponse = await apiFetch(`${API_BASE}/alerts?include_expired=true`);
         const alertsData = await alertsResponse.json();
 
         if (alertsData.success && alertsList) {
@@ -696,7 +889,7 @@ function refreshAlerts() {
 // Import/Export Functions
 async function loadCertificatesForExport() {
     try {
-        const response = await fetch(`${API_BASE}/certificates`);
+        const response = await apiFetch(`${API_BASE}/certificates?limit=500&page=1`);
         const result = await response.json();
         
         if (result.success) {
@@ -752,7 +945,7 @@ async function handleImportSubmit(e) {
         }
         uploadData.append('validate', validate);
         
-        const response = await fetch(`${API_BASE}/certificates/import`, {
+        const response = await apiFetch(`${API_BASE}/certificates/import`, {
             method: 'POST',
             body: uploadData,
         });
@@ -798,30 +991,19 @@ async function handleExportSubmit(e) {
             params.append('password', password);
         }
         
-        const response = await fetch(`${API_BASE}/certificates/${certId}/export?${params}`, {
+        const response = await apiFetch(`${API_BASE}/certificates/${certId}/export?${params}`, {
             method: 'POST',
         });
         
         const result = await response.json();
         
         if (result.success) {
-            const data = result.data;
-            
-            // Télécharger le certificat
-            if (data.certificate) {
-                downloadFile(data.certificate.content, data.certificate.filename, data.certificate.mime_type);
-            } else if (data.content) {
-                // PKCS#12
-                downloadFile(data.content, data.filename, data.mime_type);
-            }
-            
-            // Télécharger la clé si présente
-            if (data.private_key) {
+            const files = extractExportFiles(result.data);
+            files.forEach((file, index) => {
                 setTimeout(() => {
-                    downloadFile(data.private_key.content, data.private_key.filename, data.private_key.mime_type);
-                }, 500);
-            }
-            
+                    downloadFile(file.content, file.filename, file.mime_type);
+                }, index * 500);
+            });
             showToast('✅ Certificat exporté avec succès !', 'success');
         } else {
             showToast(`❌ Erreur: ${result.detail || 'Erreur lors de l\'export'}`, 'error');
@@ -830,6 +1012,43 @@ async function handleExportSubmit(e) {
         showToast('Erreur de connexion', 'error');
         console.error(error);
     }
+}
+
+function extractExportFiles(data) {
+    const files = [];
+    if (!data) return files;
+
+    if (data.certificate) {
+        files.push({
+            content: data.certificate.file_data || data.certificate.content,
+            filename: data.certificate.filename,
+            mime_type: data.certificate.mime_type,
+        });
+        if (data.private_key) {
+            files.push({
+                content: data.private_key.file_data || data.private_key.content,
+                filename: data.private_key.filename,
+                mime_type: data.private_key.mime_type,
+            });
+        }
+        return files;
+    }
+
+    if (data.file_data && data.filename) {
+        files.push({
+            content: data.file_data,
+            filename: data.filename,
+            mime_type: data.mime_type,
+        });
+    } else if (data.content && data.filename) {
+        files.push({
+            content: data.content,
+            filename: data.filename,
+            mime_type: data.mime_type,
+        });
+    }
+
+    return files;
 }
 
 function downloadFile(base64Content, filename, mimeType) {
@@ -860,7 +1079,7 @@ async function loadCA() {
     if (list) list.innerHTML = '';
 
     try {
-        const response = await fetch(`${API_BASE}/ca`);
+        const response = await apiFetch(`${API_BASE}/ca`);
         const result = await response.json();
 
         if (result.success) {
@@ -967,7 +1186,7 @@ async function handleCAImportSubmit(e) {
         uploadData.append('is_root', isRoot.toString());
         uploadData.append('is_trusted', isTrusted.toString());
         
-        const response = await fetch(`${API_BASE}/ca/import`, {
+        const response = await apiFetch(`${API_BASE}/ca/import`, {
             method: 'POST',
             body: uploadData,
         });
@@ -989,7 +1208,7 @@ async function handleCAImportSubmit(e) {
 
 async function deleteCA(caId) {
     try {
-        const response = await fetch(`${API_BASE}/ca/${caId}`, {
+        const response = await apiFetch(`${API_BASE}/ca/${caId}`, {
             method: 'DELETE',
         });
 
@@ -1014,7 +1233,7 @@ function refreshCA() {
 // Let's Encrypt Functions
 async function checkCertbotAndLoadLE() {
     try {
-        const response = await fetch(`${API_BASE}/letsencrypt/check-certbot`);
+        const response = await apiFetch(`${API_BASE}/letsencrypt/check-certbot`);
         const result = await response.json();
         
         const checkDiv = document.getElementById('letsencrypt-certbot-check');
@@ -1041,7 +1260,7 @@ async function loadLetsEncrypt() {
     if (list) list.innerHTML = '';
 
     try {
-        const response = await fetch(`${API_BASE}/letsencrypt`);
+        const response = await apiFetch(`${API_BASE}/letsencrypt`);
         const result = await response.json();
 
         if (result.success) {
@@ -1159,7 +1378,7 @@ async function handleLetsEncryptObtainSubmit(e) {
             data.webroot = webroot;
         }
         
-        const response = await fetch(`${API_BASE}/letsencrypt/obtain`, {
+        const response = await apiFetch(`${API_BASE}/letsencrypt/obtain`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1191,7 +1410,7 @@ async function renewLetsEncryptCertificate(certId) {
     try {
         showToast('Renouvellement en cours...', 'info');
         
-        const response = await fetch(`${API_BASE}/letsencrypt/${certId}/renew`, {
+        const response = await apiFetch(`${API_BASE}/letsencrypt/${certId}/renew`, {
             method: 'POST',
         });
 
@@ -1223,7 +1442,7 @@ async function loadClientCertificates() {
     if (list) list.innerHTML = '';
 
     try {
-        const response = await fetch(`${API_BASE}/client-certificates`);
+        const response = await apiFetch(`${API_BASE}/client-certificates`);
         const result = await response.json();
 
         if (result.success) {
@@ -1304,7 +1523,7 @@ async function handleClientGenerateSubmit(e) {
     try {
         showToast('Génération du certificat client en cours...', 'info');
         
-        const response = await fetch(`${API_BASE}/client-certificates`, {
+        const response = await apiFetch(`${API_BASE}/client-certificates`, {
             method: 'POST',
             body: data,
         });
@@ -1337,15 +1556,18 @@ async function exportClientCertificateForBrowser(certId) {
             params.append('password', password);
         }
         
-        const response = await fetch(`${API_BASE}/client-certificates/${certId}/export-browser?${params}`, {
+        const response = await apiFetch(`${API_BASE}/client-certificates/${certId}/export-browser?${params}`, {
             method: 'POST',
         });
         
         const result = await response.json();
         
-        if (result.success && result.data.file_data) {
-            const filename = result.data.filename;
-            downloadFile(result.data.file_data, filename, result.data.mime_type);
+        if (result.success && result.data) {
+            const files = extractExportFiles(result.data);
+            if (files.length > 0) {
+                const file = files[0];
+                downloadFile(file.content, file.filename, file.mime_type);
+            }
             showToast('✅ Certificat exporté avec succès !', 'success');
             showToast('Vous pouvez maintenant l\'importer dans votre navigateur', 'info');
         } else {
@@ -1477,13 +1699,22 @@ async function bulkExport() {
         // Exporter chaque certificat individuellement
         for (const certId of certIds) {
             try {
-                const response = await fetch(`${API_BASE}/certificates/${certId}/export?format=${format.toUpperCase()}&include_key=true`);
+                const response = await apiFetch(`${API_BASE}/certificates/${certId}/export?format=${format.toUpperCase()}&include_key=true`);
                 const result = await response.json();
                 
-                if (result.success && result.data.file_data) {
+                if (result.success) {
+                    const files = extractExportFiles(result.data);
                     const cert = certificates.find(c => c.id === certId);
-                    const filename = `${cert?.common_name || certId}_${format.toLowerCase()}.${format === 'PKCS12' ? 'p12' : format.toLowerCase()}`;
-                    downloadFile(result.data.file_data, filename, result.data.mime_type);
+                    files.forEach((file, index) => {
+                        const defaultName = `${cert?.common_name || certId}_${format.toLowerCase()}.${format === 'PKCS12' ? 'p12' : format.toLowerCase()}`;
+                        setTimeout(() => {
+                            downloadFile(
+                                file.content,
+                                file.filename || defaultName,
+                                file.mime_type
+                            );
+                        }, index * 300);
+                    });
                 }
             } catch (error) {
                 console.error(`Erreur lors de l'export du certificat ${certId}:`, error);
@@ -1555,7 +1786,12 @@ function applyFilters() {
     currentFilters.expiryDays = document.getElementById('filter-expiry-days')?.value || '';
     currentFilters.organization = document.getElementById('filter-organization')?.value || '';
     
-    displayCertificates(certificates);
+    certPage = 1;
+    if (currentFilters.keyType || currentFilters.expiryDays || currentFilters.organization) {
+        displayCertificates(certificates);
+    } else {
+        loadCertificates();
+    }
 }
 
 function applyFiltersToCertificates(certs) {
@@ -1851,7 +2087,7 @@ async function renewCertificate(certId) {
     try {
         showToast('Renouvellement en cours...', 'info');
         
-        const response = await fetch(`${API_BASE}/certificates/${certId}/renew`, {
+        const response = await apiFetch(`${API_BASE}/certificates/${certId}/renew`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1875,3 +2111,402 @@ async function renewCertificate(certId) {
     }
 }
 
+
+// --- Audit & Admin ---
+
+async function loadAuditLogs() {
+    const container = document.getElementById('audit-logs-container');
+    if (!container) return;
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Chargement...</div>';
+    try {
+        const response = await apiFetch(`${API_BASE}/audit?limit=200`);
+        const result = await response.json();
+        if (!result.success || !result.data.length) {
+            container.innerHTML = '<p class="empty-state">Aucune entrée d\'audit</p>';
+            return;
+        }
+        container.innerHTML = result.data.map(log => `
+            <div class="alert-card ${log.success ? '' : 'alert-critical'}">
+                <div class="alert-header">
+                    <span class="alert-level">${log.action}</span>
+                    <span class="alert-date">${new Date(log.timestamp).toLocaleString('fr-FR')}</span>
+                </div>
+                <p><strong>${log.username}</strong> — ${log.resource_type || ''} ${log.resource_id || ''}</p>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = '<p class="empty-state">Erreur</p>';
+    }
+}
+
+function exportAuditLogs(format) {
+    apiFetch(`${API_BASE}/audit/export?format=${format}&limit=5000`)
+        .then(r => r.text())
+        .then(text => {
+            const blob = new Blob([text], { type: format === 'csv' ? 'text/csv' : 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `audit.${format}`;
+            a.click();
+        });
+}
+
+async function loadUsers() {
+    const container = document.getElementById('users-list-container');
+    if (!container) return;
+    try {
+        const response = await apiFetch(`${API_BASE}/auth/users`);
+        const result = await response.json();
+        if (!result.success) { container.innerHTML = '<p>Accès refusé</p>'; return; }
+        container.innerHTML = `<table class="data-table"><thead><tr><th>Utilisateur</th><th>Rôle</th><th></th></tr></thead><tbody>
+            ${result.data.map(u => `<tr><td>${u.username}</td><td>${u.role}</td>
+            <td><button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}')">Supprimer</button></td></tr>`).join('')}
+        </tbody></table>`;
+    } catch (e) { container.innerHTML = '<p>Erreur</p>'; }
+}
+
+async function createUser(event) {
+    event.preventDefault();
+    const body = {
+        username: document.getElementById('new-username').value,
+        password: document.getElementById('new-password').value,
+        role: document.getElementById('new-role').value,
+    };
+    const response = await apiFetch(`${API_BASE}/auth/users`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    if (result.success) { showToast('Utilisateur créé', 'success'); loadUsers(); }
+    else showToast(result.detail || 'Erreur', 'error');
+}
+
+async function deleteUser(userId) {
+    if (!confirm('Supprimer cet utilisateur ?')) return;
+    const response = await apiFetch(`${API_BASE}/auth/users/${userId}`, { method: 'DELETE' });
+    const result = await response.json();
+    if (result.success) { showToast('Supprimé', 'success'); loadUsers(); }
+}
+
+// --- Archives, CSR list, Settings ---
+
+async function loadArchives() {
+    const container = document.getElementById('archives-list');
+    if (!container) return;
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Chargement...</div>';
+    try {
+        const response = await apiFetch(`${API_BASE}/archives`);
+        const result = await response.json();
+        if (!result.success || !result.data?.length) {
+            container.innerHTML = '<p class="empty-state">Aucun certificat archivé</p>';
+            return;
+        }
+        container.innerHTML = result.data.map(arch => `
+            <div class="certificate-card">
+                <div class="certificate-header">
+                    <h3>${arch.common_name || arch.id}</h3>
+                    <span class="cert-status expired">Archivé</span>
+                </div>
+                <div class="certificate-info">
+                    <p><i class="fas fa-calendar"></i> Archivé le ${arch.archived_at ? new Date(arch.archived_at).toLocaleString('fr-FR') : 'N/A'}</p>
+                    <p><i class="fas fa-building"></i> ${arch.organization || '—'}</p>
+                    <p><i class="fas fa-fingerprint"></i> ${arch.id?.substring(0, 12)}...</p>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = '<p class="empty-state">Erreur de chargement</p>';
+    }
+}
+
+async function loadCSRList() {
+    const container = document.getElementById('csr-list-container');
+    if (!container) return;
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Chargement...</div>';
+    try {
+        const [csrRes, caRes] = await Promise.all([
+            apiFetch(`${API_BASE}/csr`),
+            apiFetch(`${API_BASE}/ca`),
+        ]);
+        const csrData = await csrRes.json();
+        const caData = await caRes.json();
+        const cas = caData.success ? (caData.data || []) : [];
+
+        if (!csrData.success || !csrData.data?.length) {
+            container.innerHTML = '<p class="empty-state">Aucune CSR en attente</p>';
+            return;
+        }
+
+        const caOptions = cas.map(ca =>
+            `<option value="${ca.id}">${ca.common_name || ca.id}</option>`
+        ).join('');
+
+        container.innerHTML = csrData.data.map(csr => `
+            <div class="csr-item" data-csr-id="${csr.id}">
+                <div class="csr-item-info">
+                    <h4>${csr.common_name || csr.id}</h4>
+                    <small>${csr.organization || ''} — ${csr.key_type || 'RSA'} ${csr.key_size || ''} bits</small>
+                </div>
+                <div class="csr-item-actions">
+                    <button class="btn btn-sm btn-secondary" onclick="downloadCSR('${csr.id}')" title="Télécharger PEM">
+                        <i class="fas fa-download"></i>
+                    </button>
+                    ${cas.length ? `
+                    <select id="ca-select-${csr.id}" class="pagination-limit">
+                        ${caOptions}
+                    </select>
+                    <button class="btn btn-sm btn-primary" onclick="signCSR('${csr.id}')">
+                        <i class="fas fa-signature"></i> Signer
+                    </button>` : ''}
+                    <button class="btn btn-sm btn-danger" onclick="deleteCSR('${csr.id}')">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = '<p class="empty-state">Erreur de chargement</p>';
+    }
+}
+
+async function downloadCSR(csrId) {
+    try {
+        const response = await apiFetch(`${API_BASE}/csr/${csrId}`);
+        const result = await response.json();
+        if (!result.success) {
+            showToast('CSR introuvable', 'error');
+            return;
+        }
+        const blob = new Blob([result.data.csr_pem], { type: 'application/x-pem-file' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${result.data.common_name || csrId}.csr.pem`;
+        a.click();
+    } catch (e) {
+        showToast('Erreur téléchargement', 'error');
+    }
+}
+
+async function signCSR(csrId) {
+    const caSelect = document.getElementById(`ca-select-${csrId}`);
+    const caId = caSelect?.value;
+    if (!caId) {
+        showToast('Sélectionnez une CA', 'warning');
+        return;
+    }
+    try {
+        const response = await apiFetch(`${API_BASE}/ca/${caId}/sign-csr`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ csr_id: csrId, validity_days: 365 }),
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast('Certificat signé avec succès', 'success');
+            loadCSRList();
+            loadCertificates();
+        } else {
+            showToast(result.detail || 'Erreur de signature', 'error');
+        }
+    } catch (e) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function deleteCSR(csrId) {
+    if (!confirm('Supprimer cette CSR ?')) return;
+    try {
+        const response = await apiFetch(`${API_BASE}/csr/${csrId}`, { method: 'DELETE' });
+        const result = await response.json();
+        if (result.success) {
+            showToast('CSR supprimée', 'success');
+            loadCSRList();
+        } else {
+            showToast(result.detail || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+function updateSettingsFormAccess() {
+    const isAdmin = currentUserRole === 'admin';
+    const saveBtn = document.getElementById('settings-save-btn');
+    if (saveBtn) saveBtn.style.display = isAdmin ? '' : 'none';
+    document.querySelectorAll('#settings-tab input, #settings-tab textarea, #settings-tab select').forEach(el => {
+        if (el.type !== 'button') el.disabled = !isAdmin;
+    });
+}
+
+async function loadSettings() {
+    updateSettingsFormAccess();
+    try {
+        const [notifRes, whRes, schedRes] = await Promise.all([
+            apiFetch(`${API_BASE}/notifications/config`),
+            apiFetch(`${API_BASE}/webhooks/config`),
+            apiFetch(`${API_BASE}/scheduler/status`),
+        ]);
+        const notif = await notifRes.json();
+        const wh = await whRes.json();
+        const sched = await schedRes.json();
+
+        if (notif.success) {
+            const c = notif.data;
+            document.getElementById('smtp-enabled').checked = !!c.enabled;
+            document.getElementById('smtp-host').value = c.smtp_host || '';
+            document.getElementById('smtp-port').value = c.smtp_port || 587;
+            document.getElementById('smtp-user').value = c.smtp_user || '';
+            document.getElementById('smtp-from').value = c.from_email || '';
+            document.getElementById('smtp-to').value = (c.to_emails || []).join(', ');
+            document.getElementById('smtp-use-tls').checked = c.use_tls !== false;
+        }
+
+        if (wh.success) {
+            const c = wh.data;
+            document.getElementById('webhook-enabled').checked = !!c.enabled;
+            document.getElementById('webhook-endpoints').value = (c.endpoints || []).join('\n');
+            const hint = document.getElementById('webhook-events-hint');
+            if (hint && wh.events) {
+                hint.textContent = `Événements : ${wh.events.join(', ')}`;
+            }
+        }
+
+        if (sched.success) {
+            const cfg = sched.data.config || {};
+            document.getElementById('sched-interval').value = cfg.interval_minutes || 60;
+            document.getElementById('sched-auto-renew').checked = !!cfg.auto_renew_enabled;
+            document.getElementById('sched-renew-days').value = cfg.auto_renew_days || 30;
+            document.getElementById('sched-alert-email').checked = !!cfg.alert_email_enabled;
+            document.getElementById('sched-alert-webhook').checked = !!cfg.alert_webhook_enabled;
+            const statusEl = document.getElementById('scheduler-status');
+            if (statusEl) {
+                statusEl.textContent = sched.data.running
+                    ? `Planificateur actif (PID ${sched.data.pid})`
+                    : 'Planificateur inactif';
+            }
+        }
+    } catch (e) {
+        showToast('Erreur chargement paramètres', 'error');
+    }
+}
+
+async function saveSettings() {
+    if (currentUserRole !== 'admin') {
+        showToast('Accès réservé aux administrateurs', 'error');
+        return;
+    }
+    try {
+        const notifBody = {
+            enabled: document.getElementById('smtp-enabled').checked,
+            smtp_host: document.getElementById('smtp-host').value || null,
+            smtp_port: parseInt(document.getElementById('smtp-port').value, 10) || 587,
+            smtp_user: document.getElementById('smtp-user').value || null,
+            from_email: document.getElementById('smtp-from').value || null,
+            to_emails: document.getElementById('smtp-to').value
+                .split(',').map(s => s.trim()).filter(Boolean),
+            use_tls: document.getElementById('smtp-use-tls').checked,
+        };
+        const pwd = document.getElementById('smtp-password').value;
+        if (pwd) notifBody.smtp_password = pwd;
+
+        const whBody = {
+            enabled: document.getElementById('webhook-enabled').checked,
+            endpoints: document.getElementById('webhook-endpoints').value
+                .split('\n').map(s => s.trim()).filter(Boolean),
+        };
+        const secret = document.getElementById('webhook-secret').value;
+        if (secret) whBody.secret = secret;
+
+        const schedBody = {
+            interval_minutes: parseInt(document.getElementById('sched-interval').value, 10),
+            auto_renew_enabled: document.getElementById('sched-auto-renew').checked,
+            auto_renew_days: parseInt(document.getElementById('sched-renew-days').value, 10),
+            alert_email_enabled: document.getElementById('sched-alert-email').checked,
+            alert_webhook_enabled: document.getElementById('sched-alert-webhook').checked,
+        };
+
+        const [nRes, wRes, sRes] = await Promise.all([
+            apiFetch(`${API_BASE}/notifications/config`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(notifBody),
+            }),
+            apiFetch(`${API_BASE}/webhooks/config`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(whBody),
+            }),
+            apiFetch(`${API_BASE}/scheduler/config`, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(schedBody),
+            }),
+        ]);
+        const nData = await nRes.json();
+        const wData = await wRes.json();
+        const sData = await sRes.json();
+        if (nData.success && wData.success && sData.success) {
+            showToast('Paramètres enregistrés', 'success');
+            document.getElementById('smtp-password').value = '';
+            document.getElementById('webhook-secret').value = '';
+            loadSettings();
+        } else {
+            showToast('Erreur lors de la sauvegarde', 'error');
+        }
+    } catch (e) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function runSchedulerJob(jobName) {
+    try {
+        const response = await apiFetch(`${API_BASE}/scheduler/run/${jobName}`, { method: 'POST' });
+        const result = await response.json();
+        if (result.success) {
+            showToast(`Job ${jobName} exécuté`, 'success');
+        } else {
+            showToast(result.detail || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showToast('Erreur de connexion', 'error');
+    }
+}
+
+async function verifyCertificateChain(certId) {
+    try {
+        const response = await apiFetch(`${API_BASE}/certificates/${certId}/verify-chain`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        const result = await response.json();
+        if (result.success) {
+            const { valid, errors } = result.data;
+            if (valid) {
+                showToast('Chaîne CA valide', 'success');
+            } else {
+                showToast(`Chaîne invalide: ${(errors || []).join('; ')}`, 'error');
+            }
+        } else {
+            showToast(result.detail || 'Erreur', 'error');
+        }
+    } catch (e) {
+        showToast('Erreur de vérification', 'error');
+    }
+}
+
+async function runComplianceScan() {
+    const container = document.getElementById('compliance-results');
+    if (container) container.textContent = 'Scan en cours...';
+    try {
+        const response = await apiFetch(`${API_BASE}/compliance/scan`);
+        const result = await response.json();
+        if (!result.success || !container) return;
+        const d = result.data;
+        container.innerHTML = `
+            <strong>${d.compliance_rate}% conformes</strong> —
+            ${d.compliant}/${d.total} OK, ${d.issues_count} problème(s)
+            ${d.issues?.length ? `<ul style="margin-top:0.5rem;">${d.issues.slice(0, 10).map(i =>
+                `<li>${i.common_name || i.cert_id}: ${i.errors.join(', ')}</li>`
+            ).join('')}</ul>` : ''}
+        `;
+    } catch (e) {
+        if (container) container.textContent = 'Erreur de scan';
+    }
+}

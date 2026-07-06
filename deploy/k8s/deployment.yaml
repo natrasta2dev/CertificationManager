@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: certmanager
+  labels:
+    app: certmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: certmanager
+  template:
+    metadata:
+      labels:
+        app: certmanager
+    spec:
+      containers:
+        - name: certmanager
+          image: certmanager:0.2.0
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: certmanager-secrets
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          env:
+            - name: CERTMANAGER_STORAGE_PATH
+              value: /data
+          livenessProbe:
+            httpGet:
+              path: /api/statistics
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: certmanager-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: certmanager
+spec:
+  selector:
+    app: certmanager
+  ports:
+    - port: 80
+      targetPort: 8000
+  type: ClusterIP

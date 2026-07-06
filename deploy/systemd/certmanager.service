@@ -1,0 +1,23 @@
+[Unit]
+Description=CertificationManager PKI Web API
+After=network.target
+
+[Service]
+Type=simple
+User=certmanager
+Group=certmanager
+WorkingDirectory=/opt/certification-manager
+EnvironmentFile=/etc/certmanager/env
+ExecStart=/opt/certification-manager/.venv/bin/certmanager web --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+# Sécurité
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/certmanager
+
+[Install]
+WantedBy=multi-user.target
